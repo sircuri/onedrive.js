@@ -1,0 +1,65 @@
+{
+  "_from": "@types/simple-oauth2",
+  "_id": "@types/simple-oauth2@2.2.1",
+  "_inBundle": false,
+  "_integrity": "sha512-mlSYlFKMnQPjvSuG1KZmhhcz81PBR82TJtdGRkBD3F7aJo8PgKUd26lckbAr5O6kZPU2WiqJWMCIwTzb0+lXww==",
+  "_location": "/@types/simple-oauth2",
+  "_phantomChildren": {},
+  "_requested": {
+    "type": "tag",
+    "registry": true,
+    "raw": "@types/simple-oauth2",
+    "name": "@types/simple-oauth2",
+    "escapedName": "@types%2fsimple-oauth2",
+    "scope": "@types",
+    "rawSpec": "",
+    "saveSpec": null,
+    "fetchSpec": "latest"
+  },
+  "_requiredBy": [
+    "#USER",
+    "/"
+  ],
+  "_resolved": "https://registry.npmjs.org/@types/simple-oauth2/-/simple-oauth2-2.2.1.tgz",
+  "_shasum": "db961cac33fd273c43b10f19b52c272dcb6530fc",
+  "_spec": "@types/simple-oauth2",
+  "_where": "/Users/arjen/Repos/Onedrive.js",
+  "bugs": {
+    "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/issues"
+  },
+  "bundleDependencies": false,
+  "contributors": [
+    {
+      "name": "Michael Müller",
+      "url": "https://github.com/mad-mike"
+    },
+    {
+      "name": "Troy Lamerton",
+      "url": "https://github.com/troy-lamerton"
+    },
+    {
+      "name": "Martín Rodriguez",
+      "url": "https://github.com/netux"
+    },
+    {
+      "name": "Linus Unnebäck",
+      "url": "https://github.com/LinusU"
+    }
+  ],
+  "dependencies": {},
+  "deprecated": false,
+  "description": "TypeScript definitions for simple-oauth2",
+  "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped#readme",
+  "license": "MIT",
+  "main": "",
+  "name": "@types/simple-oauth2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DefinitelyTyped/DefinitelyTyped.git"
+  },
+  "scripts": {},
+  "typeScriptVersion": "2.9",
+  "types": "index",
+  "typesPublisherContentHash": "f9411be77cadd7a6d98b5e1e3c4621b9eedd61612140886e4eb5a600505bae7f",
+  "version": "2.2.1"
+}
