@@ -88,6 +88,86 @@ export class Mutex {
     }
 }
 
+export interface QueueItem {
+    value: () => PromiseLike<void>;
+    next?: QueueItem;
+    previous?: QueueItem;
+}
+
+export class Queue {
+    private limit: number;
+    private head: QueueItem | undefined;
+    private tail: QueueItem | undefined;
+
+    private collectionMutex = new Mutex();
+    private count: number = 0;
+
+    constructor() { }
+
+    public maxTasks(max: number): Queue {
+        this.limit = max;
+        return this;
+    }
+
+    public async enqueue(fn: () => PromiseLike<void>) {
+        return await this.collectionMutex.dispatch(async () => {
+            if (this.head === undefined)
+                this.head = { value: fn };
+            else {
+                var link = this.head;
+                this.head = {
+                    value: fn,
+                    next: link
+                }
+                link.previous = this.head;
+            }
+            if (this.tail === undefined) {
+                this.tail = this.head;
+            }
+            this.count++;
+        });
+    }
+
+    public async dequeue(): Promise<() => PromiseLike<void>> {
+        return await this.collectionMutex.dispatch(async () => {
+            var _tail: QueueItem | undefined = undefined;
+            if (this.tail !== undefined) {
+                _tail = this.tail;
+                this.tail = this.tail.previous;
+                this.count--;
+            }
+            else
+                this.head = undefined;
+            
+            return _tail !== undefined ? _tail.value : undefined;
+        });
+    }
+
+    public async run(runner: (queue: Queue) => void) {
+        return new Promise<void>(async (resolve, reject) => {
+            var i = 0;
+
+            await runner(this);
+
+            var tasks: ((() => PromiseLike<void>) | undefined)[] = new Array(this.limit).fill(undefined);
+            console.log(this.count);
+            
+            // while (this.tail !== undefined) {
+            //     for(var i = 0; i < this.limit; i++) {
+            //         if (tasks[i] === undefined) {
+            //             var task = await this.dequeue(); 
+            //             tasks[i] = task;
+            //             task().then(() => tasks[i] = undefined);
+            //             break;
+            //         }
+            //     }
+            //     console.log(tasks);
+            // }
+            resolve();
+        });
+    }
+}
+
 (async () => {
 
     const config = new Config();
