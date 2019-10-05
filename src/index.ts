@@ -1,66 +1,96 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { Config } from './config/config';
-import { OnedriveServer } from './server';
-import { create, AccessToken } from 'simple-oauth2';
+import { OneDriveApi } from './onedrive';
+
+function relativePath(basePath: string, absolutePath: string) {
+    if (absolutePath.startsWith(basePath)) {
+        let _path = absolutePath.substring(basePath.length);
+        if (_path.length == 0) _path = path.sep;
+        return _path;
+    } else {
+        return path.relative(basePath, absolutePath);
+    }
+}
+
+function convertbytes(bytes: number): string {
+    if (bytes > 1073741824) return `${Math.floor(bytes/1073741824)}.${Math.floor(bytes%1073741824/10000000)}G`;
+    if (bytes > 1048576) return `${Math.floor(bytes/1048576)}.${Math.floor(bytes%1048576/10000)}M`;
+    if (bytes > 1024) return `${Math.floor(bytes/1024)}.${Math.floor(bytes%1024/100)}K`;
+    else return `${bytes}`;
+}
+
+export interface FileObject {
+    isFile: boolean;
+    filename: string;
+    size: number;
+    path: string;
+    basedir: string;
+    absolutePath: string;
+}
+
+function *dirsAndFiles (baseDir: string, dir: string, options?: { pattern?: RegExp }): Generator<FileObject> {
+    const files = fs.readdirSync(dir);
+    for (const file of files) {
+
+        if (options !== undefined && options.pattern !== undefined && !options.pattern.test(file))
+            continue;
+
+        const filepath = path.join(dir, file);
+
+        try {
+            fs.accessSync(filepath, fs.constants.R_OK);
+
+            const stat: fs.Stats = fs.statSync(filepath);
+            if (stat.isFile() || stat.isDirectory()) {
+                const _relpath = relativePath(baseDir, dir);
+                var fileObject = {
+                    isFile: stat.isFile(),
+                    filename: file,
+                    size: stat.size,
+                    path: path.join(_relpath, file),
+                    basedir: _relpath,
+                    absolutePath: filepath
+                };
+                yield fileObject;
+            }
+            if (stat.isDirectory()) {
+                yield *dirsAndFiles(baseDir, filepath, options);
+            }
+        } catch (err) {
+            console.error('Could not read ' + filepath);
+        }
+    }
+}
 
 (async () => {
 
     const config = new Config();
-    const credentials = {
-        client: {
-            id: config.authentication().clientId,
-            secret: config.authentication().clientSecret
-        },
-        auth: {
-            tokenHost: 'https://login.microsoftonline.com',
-            authorizePath: 'common/oauth2/v2.0/authorize',
-            tokenPath: 'common/oauth2/v2.0/token'
-        }
-    };
-    const oauth2Client = create(credentials);
+    const api = new OneDriveApi(config);
 
-    if (fs.existsSync("token.json")) {
-        var buffer = fs.readFileSync("token.json");
-        var tokenObject = JSON.parse(buffer.toString());
-        var accessToken = oauth2Client.accessToken.create(tokenObject.token);
-
-        const EXPIRATION_WINDOW_IN_SECONDS = 300;
-        const { token } = accessToken;
-        const expirationTimeInSeconds = token.expires_at.getTime() / 1000;
-        const expirationWindowStart = expirationTimeInSeconds - EXPIRATION_WINDOW_IN_SECONDS;
-        const nowInSeconds = (new Date()).getTime() / 1000;
-        const shouldRefresh = nowInSeconds >= expirationWindowStart;
-        if (shouldRefresh) {
-            try {
-                accessToken = await accessToken.refresh();
-                fs.writeFile('token.json', JSON.stringify(accessToken, null, 2), (e) => {
-                    if (e) { console.log(e); throw e; }
-                    console.log('Token refreshed')
-                })
-            } catch (error) {
-                console.log('Error refreshing access token: ', error.message);
-                throw error;
-            }
+    async function upload(file: FileObject) {
+        if (file.isFile) {
+            await api.uploadFile('/Users/arjen/Downloads', file.path);
+        } else {
+            await api.createFolder(file.basedir, file.filename);
         }
-    } else {
-        console.log("Missing token. Point your browser to 'http://" + config.http().host + ":" + config.http().port + "/auth");
-        const server = new OnedriveServer(config, oauth2Client);
-        server.start();
     }
 
-    /*
-    1. Verify access token
-        2. No token found
-            3. Start webserver
-            4. Ask user to open url localhost/auth
-            5. Get token
-            6. End application
-        7. Token expired
-            8. Refresh token
-    9. Start copy files to onedrive
-    */
-})().catch(e => {
+    await api.loadAccessToken()
+        .then(async () => { // , { pattern: /DeepL\.dmg$/ }
+            var files = dirsAndFiles("/Users/arjen/Downloads", "/Users/arjen/Downloads");
+            var file = files.next();
+
+            while (!file.done) {
+                await upload(file.value);
+                file = files.next();
+            }
+        })
+        .catch((error) => console.log(error));
+
+})().then(() => {
+    console.log("done");
+}).catch(e => {
     // Deal with the fact the chain failed
     console.log(e);
 });
-

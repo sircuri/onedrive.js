@@ -6,19 +6,26 @@ export interface IHttpSection {
     host: string
 }
 
+export interface IOneDriveSection {
+    authentication: IAuthenticationSection;
+    fragmentSizeMB: number;
+    destinationPath: string;
+}
+
 export interface IAuthenticationSection {
     clientId: string,
-    clientSecret: string
+    clientSecret: string,
+    tokenFilePath: string
 }
 
 export interface IConfigFile {
     http: IHttpSection,
-    authentication: IAuthenticationSection
+    onedrive: IOneDriveSection
 }
 
 export interface IConfig {
     http(): IHttpSection,
-    authentication(): IAuthenticationSection,
+    onedrive(): IOneDriveSection,
     version(): string
 }
 
@@ -46,8 +53,8 @@ export class Config implements IConfig {
         return this._config.http;
     }
 
-    authentication(): IAuthenticationSection {
-        return this._config.authentication;
+    onedrive(): IOneDriveSection {
+        return this._config.onedrive;
     }
 
     version(): string {

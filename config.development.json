@@ -3,8 +3,13 @@
       "port": "8000",
       "host": "localhost"
     },
-    "authentication": {
-      "clientId": "0206c1ab-8cc1-4a08-a7d7-ea2fd1462f52",
-      "clientSecret": "tgNBKB894)=_bbvzhDQG29)"
+    "onedrive": {
+      "authentication": {
+        "clientId": "0206c1ab-8cc1-4a08-a7d7-ea2fd1462f52",
+        "clientSecret": "tgNBKB894)=_bbvzhDQG29)",
+        "tokenFilePath": "/tmp/onedrive.token.json"
+      },
+      "fragmentSizeMB": 4,
+      "destinationPath": "/test"
     }
   }
