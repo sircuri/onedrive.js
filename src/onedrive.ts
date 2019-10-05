@@ -29,7 +29,7 @@ export class UploadSession {
             barCompleteChar: '\u2588',
             barIncompleteChar: '\u2591',
             hideCursor: true,
-            clearOnComplete: true
+            clearOnComplete: false
         });
 
         if ('expirationDateTime' in data) {
