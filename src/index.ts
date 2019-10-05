@@ -14,9 +14,9 @@ function relativePath(basePath: string, absolutePath: string) {
 }
 
 function convertbytes(bytes: number): string {
-    if (bytes > 1073741824) return `${Math.floor(bytes/1073741824)}.${Math.floor(bytes%1073741824/10000000)}G`;
-    if (bytes > 1048576) return `${Math.floor(bytes/1048576)}.${Math.floor(bytes%1048576/10000)}M`;
-    if (bytes > 1024) return `${Math.floor(bytes/1024)}.${Math.floor(bytes%1024/100)}K`;
+    if (bytes > 1073741824) return `${Math.floor(bytes / 1073741824)}.${Math.floor(bytes % 1073741824 / 10000000)}G`;
+    if (bytes > 1048576) return `${Math.floor(bytes / 1048576)}.${Math.floor(bytes % 1048576 / 10000)}M`;
+    if (bytes > 1024) return `${Math.floor(bytes / 1024)}.${Math.floor(bytes % 1024 / 100)}K`;
     else return `${bytes}`;
 }
 
@@ -29,7 +29,7 @@ export interface FileObject {
     absolutePath: string;
 }
 
-function *dirsAndFiles (baseDir: string, dir: string, options?: { pattern?: RegExp }): Generator<FileObject> {
+function* dirsAndFiles(baseDir: string, dir: string, options?: { pattern?: RegExp }): Generator<FileObject> {
     const files = fs.readdirSync(dir);
     for (const file of files) {
 
@@ -55,7 +55,7 @@ function *dirsAndFiles (baseDir: string, dir: string, options?: { pattern?: RegE
                 yield fileObject;
             }
             if (stat.isDirectory()) {
-                yield *dirsAndFiles(baseDir, filepath, options);
+                yield* dirsAndFiles(baseDir, filepath, options);
             }
         } catch (err) {
             console.error('Could not read ' + filepath);
