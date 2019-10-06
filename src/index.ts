@@ -40,6 +40,7 @@ function* dirsAndFiles(baseDir: string, dir: string, options?: { pattern?: RegEx
     const filePattern: RegExp | undefined = options !== undefined ? options.pattern : undefined;
     const mode: Mode = options !== undefined ? (options.mode !== undefined ? options.mode : Mode.Both) : Mode.Both;
 
+    const fileFormat = /[\/\\*<>?:|]/;
     const files = fs.readdirSync(dir);
     for (const file of files) {
         if (filePattern !== undefined && !filePattern.test(file))
@@ -48,7 +49,7 @@ function* dirsAndFiles(baseDir: string, dir: string, options?: { pattern?: RegEx
         const filepath = path.join(dir, file);
 
         try {
-            if (file.endsWith('.')) {
+            if (fileFormat.test(file) || file.endsWith('.')) {
                 throw new Error(`Illegal filename '${filepath}'`);
             }
 
@@ -73,7 +74,7 @@ function* dirsAndFiles(baseDir: string, dir: string, options?: { pattern?: RegEx
                 yield* dirsAndFiles(baseDir, filepath, options);
             }
         } catch (err) {
-            console.error('Could not read ' + filepath);
+            console.error(err.name + ': ' + err.message);
         }
     }
 }
