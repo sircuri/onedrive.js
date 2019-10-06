@@ -307,7 +307,7 @@ export class OneDriveApi {
     }
 
     private async uploadFileToSession(uploadSession: UploadSession, fullPath: string, stats: fs.Stats) {
-        uploadSession.start(stats.size);
+        //uploadSession.start(stats.size);
 
         var offset = 0;
         var readStream = fs.createReadStream(fullPath);
@@ -317,10 +317,11 @@ export class OneDriveApi {
         var bytesWritten = 0;
         for await (const chunk of fixedSizeTransform) {
             bytesWritten += await this.uploadFragment(uploadSession.uploadUrl, offset, this.offsetSize, chunk, stats.size);
-            uploadSession.update(bytesWritten);
+            //uploadSession.update(bytesWritten);
             offset += this.offsetSize;
         }
-        uploadSession.stop();
+        console.log(`Uploaded '${fullPath}'`)
+        //uploadSession.stop();
 
         return bytesWritten;
     }
@@ -359,7 +360,10 @@ export class OneDriveApi {
                 }
             };
             this.post(options)
-                .then((data) => resolve(data))
+                .then((data) => {
+                    console.log(`Created folder '${fullPath}/${folderName}'`)
+                    resolve(data);
+                })
                 .catch((reason) => reject(reason))
         });
     }

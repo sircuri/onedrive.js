@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Config } from './config/config';
 import { OneDriveApi } from './onedrive';
+import tress = require('tress');
 
 function relativePath(basePath: string, absolutePath: string) {
     if (absolutePath.startsWith(basePath)) {
@@ -29,20 +30,34 @@ export interface FileObject {
     absolutePath: string;
 }
 
-function* dirsAndFiles(baseDir: string, dir: string, options?: { pattern?: RegExp }): Generator<FileObject> {
+enum Mode {
+    Both,
+    File,
+    Directory,
+}
+
+function* dirsAndFiles(baseDir: string, dir: string, options?: { pattern?: RegExp, mode?: Mode }): Generator<FileObject> {
+    const filePattern: RegExp | undefined = options !== undefined ? options.pattern : undefined;
+    const mode: Mode = options !== undefined ? (options.mode !== undefined ? options.mode : Mode.Both) : Mode.Both;
+
     const files = fs.readdirSync(dir);
     for (const file of files) {
-
-        if (options !== undefined && options.pattern !== undefined && !options.pattern.test(file))
+        if (filePattern !== undefined && !filePattern.test(file))
             continue;
 
         const filepath = path.join(dir, file);
 
         try {
+            if (file.endsWith('.')) {
+                throw new Error(`Illegal filename '${filepath}'`);
+            }
+
             fs.accessSync(filepath, fs.constants.R_OK);
 
             const stat: fs.Stats = fs.statSync(filepath);
-            if (stat.isFile() || stat.isDirectory()) {
+            if ( (mode == Mode.Both && (stat.isFile() || stat.isDirectory()) ) ||
+                 (mode == Mode.File && stat.isFile()) ||
+                 (mode == Mode.Directory && stat.isDirectory()) ) {
                 const _relpath = relativePath(baseDir, dir);
                 var fileObject = {
                     isFile: stat.isFile(),
@@ -181,17 +196,61 @@ export class Queue {
         }
     }
 
-    await api.loadAccessToken()
-        .then(async () => { // , { pattern: /DeepL\.dmg$/ }
-            var files = dirsAndFiles("/Users/arjen/Downloads", "/Users/arjen/Downloads");
-            var file = files.next();
+    async function go() {
+        return new Promise<void>((resolve, reject) => {
+            // create a queue object with worker and concurrency 2
+            var q = tress(function(job, done) {
+                var a: any = job.file;
+                var fileObject: FileObject = a;
+                upload(fileObject)
+                    .then(() => done(null))
+//                    .catch((reason) => done(reason));
+                    .catch((reason) => {
+                        console.log(`Could not handle '${fileObject.basedir}/${fileObject.filename}'`);
+                        console.log(reason);
+                        done(true);
+                    });
+            }, 10);
 
-            while (!file.done) {
-                await upload(file.value);
-                file = files.next();
+            // assign a callbacks
+            q.drain = function() {
+                resolve();
+                console.log('Finished');
+            };
+
+            q.error = function(err) {
+                console.log(err);
+            };
+
+            q.success = function(data) {
+                // console.log('Job ' + this + ' successfully finished. Result is ' + data);
             }
-        })
-        .catch((error) => console.log(error));
+
+            var folders = dirsAndFiles("/Users/arjen/Downloads", "/Users/arjen/Downloads", { mode: Mode.Directory });
+            for(var file of folders) {
+                q.push({file: file});
+            }
+
+            var files = dirsAndFiles("/Users/arjen/Downloads", "/Users/arjen/Downloads", { mode: Mode.File });
+            for(var file of files) {
+                q.push({file: file});
+            }
+        });
+    }
+    await api.loadAccessToken();
+    await go();
+
+    // await api.loadAccessToken()
+    //     .then(async () => { // , { pattern: /DeepL\.dmg$/ }
+    //         var files = dirsAndFiles("/Users/arjen/Downloads", "/Users/arjen/Downloads");
+    //         var file = files.next();
+
+    //         while (!file.done) {
+    //             await upload(file.value);
+    //             file = files.next();
+    //         }
+    //     })
+    //     .catch((error) => console.log(error));
 
 })().then(() => {
     console.log("done");
