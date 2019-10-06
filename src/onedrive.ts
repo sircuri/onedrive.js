@@ -328,7 +328,7 @@ export class OneDriveApi {
 
     public async uploadFile(basePath: string, filePath: string) {
         return new Promise<number>((resolve, reject) => {
-            const fullPath = basePath + '/' + filePath;
+            const fullPath = join(basePath, filePath);
             const stats = fs.statSync(fullPath);
 
             this.verifyAccessToken()
