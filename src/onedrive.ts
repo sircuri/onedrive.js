@@ -216,6 +216,7 @@ export class OneDriveApi {
                         if (error) reject(error);
                         else if (!this.isSuccess(response)) reject({
                                 statusCode: response.statusCode,
+                                headers: response.headers,
                                 data: data
                             });
                         else resolve(data);
@@ -233,6 +234,7 @@ export class OneDriveApi {
                         if (error) reject(error);
                         else if (!this.isSuccess(response)) reject({
                             statusCode: response.statusCode,
+                            headers: response.headers,
                             data: data
                         });
                         else resolve(data);
@@ -250,6 +252,7 @@ export class OneDriveApi {
                         if (error) reject(error);
                         else if (!this.isSuccess(response)) reject({
                             statusCode: response.statusCode,
+                            headers: response.headers,
                             data: data
                         });
                         else resolve(data);
