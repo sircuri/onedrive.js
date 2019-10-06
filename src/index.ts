@@ -2,7 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Config } from './config/config';
 import { OneDriveApi } from './onedrive';
-import tress = require('tress');
+import { IncomingHttpHeaders } from 'http';
+
+const type = require('easytype');
 
 function relativePath(basePath: string, absolutePath: string) {
     if (absolutePath.startsWith(basePath)) {
@@ -104,83 +106,129 @@ export class Mutex {
     }
 }
 
-export interface QueueItem {
-    value: () => PromiseLike<void>;
-    next?: QueueItem;
-    previous?: QueueItem;
+export interface JobData {
+    data: any,
+    retryCount: number;
+    delay: number;
 }
 
 export class Queue {
-    private limit: number;
-    private head: QueueItem | undefined;
-    private tail: QueueItem | undefined;
+    private noop = () => undefined;
 
-    private collectionMutex = new Mutex();
-    private count: number = 0;
+    private maxTasks: number;
+    private retries: number;
+    private paused: boolean;
+    private saturated: boolean;
+    private buffer: number;
+    private worker: (job: any, callback:(err?: any, ...args: any[]) => void) => void;
 
-    constructor() { }
+    private waiting: JobData[] = [];
+    private active: JobData[] = [];
+    private failed: JobData[] = [];
+    private finished: JobData[] = [];
 
-    public maxTasks(max: number): Queue {
-        this.limit = max;
+    private drain: () => void = this.noop;
+
+    constructor() {
+        this.retries = 0;
+        this.buffer = 0;
+        this.waiting = [];
+        this.active = [];
+        this.failed = [];
+        this.finished = [];
+    }
+
+    public concurrent(max: number): Queue {
+        this.maxTasks = max;
+        this.buffer = Math.floor(max / 4);
         return this;
     }
 
-    public async enqueue(fn: () => PromiseLike<void>) {
-        return await this.collectionMutex.dispatch(async () => {
-            if (this.head === undefined)
-                this.head = { value: fn };
-            else {
-                var link = this.head;
-                this.head = {
-                    value: fn,
-                    next: link
+    public retry(count: number): Queue {
+        this.retries = count;
+        return this;
+    }
+
+    public withWorker(worker: (job: any, callback:(err?: any, ...args: any[]) => void) => void) {
+        this.worker = worker;
+        return this;
+    }
+
+    public pause() {
+        this.paused = true;
+    }
+
+    public resume() {
+        this.paused = false;
+        this._startJob();
+    }
+
+    public onDrain(fn: () => void) {
+        this.drain = fn;
+        return this;
+    }
+
+    private _startJob() {
+        if(this.waiting.length === 0 && this.active.length === 0) this.drain();
+        if(this.paused || this.active.length >= this.maxTasks || this.waiting.length === 0) return;
+
+        const job = this.waiting.shift() !;
+        this.active.push(job);
+
+        //if(this.waiting.length === 0) onEmpty(); // no more waiting tasks
+        if(this.active.length === this.maxTasks && !this.saturated){
+            this.saturated = true;
+            //onSaturated();
+        }
+
+        let doneCalled = false;
+        let delay = job.retryCount > 0 ? Math.floor(Math.random() * 3) + job.delay : 0;
+
+        setTimeout(this.worker.bind(this), delay, job.data, (err?: any, ...args: any[]) => {
+            if(doneCalled){
+                throw new Error('Callback can only be called once in the worker');
+            } else {
+                doneCalled = true;
+            }
+
+            this.active = this.active.filter(v => v !== job);
+            const delay = typeof err === 'number' ? err : 0;
+            if(typeof err !== 'undefined') {
+                if (job.retryCount < this.retries) {
+                    job.retryCount++;
+                    job.delay = delay;
+                    this.waiting.unshift(job);
+                } else {
+                    this.failed.push(job);
                 }
-                link.previous = this.head;
+            } else {
+                this.finished.push(job);
+                // if(err) onError.call(job.data, err, ...args);
+                // if(!err) onSuccess.call(job.data, ...args);
             }
-            if (this.tail === undefined) {
-                this.tail = this.head;
+
+            if(this.active.length <= this.maxTasks - this.buffer && this.saturated){
+                this.saturated = false;
+                //onUnsaturated();
             }
-            this.count++;
+            this._startJob();
         });
+
+        this._startJob();
     }
 
-    public async dequeue(): Promise<() => PromiseLike<void>> {
-        return await this.collectionMutex.dispatch(async () => {
-            var _tail: QueueItem | undefined = undefined;
-            if (this.tail !== undefined) {
-                _tail = this.tail;
-                this.tail = this.tail.previous;
-                this.count--;
-            }
-            else
-                this.head = undefined;
-            
-            return _tail !== undefined ? _tail.value : undefined;
-        });
-    }
+    public enqueue(job: any) {
+        if(type.isFunction(job) || type.isUndefined(job)) throw new TypeError(`Unable to add ${type(job)} to queue`);
 
-    public async run(runner: (queue: Queue) => void) {
-        return new Promise<void>(async (resolve, reject) => {
-            var i = 0;
+        const jobData = {
+            data: job,
+            retryCount: 0,
+            delay: 0
+        };
 
-            await runner(this);
+        this.waiting.push(jobData);
 
-            var tasks: ((() => PromiseLike<void>) | undefined)[] = new Array(this.limit).fill(undefined);
-            console.log(this.count);
-            
-            // while (this.tail !== undefined) {
-            //     for(var i = 0; i < this.limit; i++) {
-            //         if (tasks[i] === undefined) {
-            //             var task = await this.dequeue(); 
-            //             tasks[i] = task;
-            //             task().then(() => tasks[i] = undefined);
-            //             break;
-            //         }
-            //     }
-            //     console.log(tasks);
-            // }
-            resolve();
-        });
+        setTimeout(this._startJob.bind(this), 0);
     }
 }
 
@@ -197,61 +245,92 @@ export class Queue {
         }
     }
 
-    async function go() {
-        return new Promise<void>((resolve, reject) => {
+    var errors = new Object();
+    errors[429] = "Too Many Requests";
+    errors[500] = "Internal Server Error";
+    errors[503] = "Service Unavailable";
+    errors[507] = "Insufficient Storage";
+    errors[509] = "Bandwidth Limit Exceeded";
+
+    function handleStatus(statusCode: number, headers: IncomingHttpHeaders) {
+        switch(statusCode) {
+            case 507: // Insufficient Storage
+                return {
+                    delay: 0,
+                    reason: errors[statusCode],
+                    abort: true
+                }
+            case 429: // Too Many Requests
+            case 500: // Internal Server Error
+            case 503: // Service Unavailable
+            case 509: // Bandwidth Limit Exceeded
+                if ('Retry-After' in headers) {
+                    return {
+                        delay: parseInt(headers['Retry-After'] as string),
+                        reason: errors[statusCode],
+                        abort: false
+                    };
+                } else {
+                    return {
+                        delay: 0,
+                        reason: errors[statusCode],
+                        abort: false
+                    };
+                }
+            default:
+                return {
+                    delay: 5,
+                    reason: `Unknown error ${statusCode}. Just delay for 5 seconds.`,
+                    abort: false
+                };
+        }
+    }
+
+
+    async function goNew() {
+        return new Promise<void>((resolve) => {
             // create a queue object with worker and concurrency 2
-            var q = tress(function(job, done) {
-                var a: any = job.file;
-                var fileObject: FileObject = a;
-                upload(fileObject)
-                    .then(() => done(null))
-//                    .catch((reason) => done(reason));
-                    .catch((reason) => {
-                        console.log(`Could not handle '${fileObject.basedir}/${fileObject.filename}'`);
-                        console.log(reason);
-                        done(true);
-                    });
-            }, 10);
+            const queue = new Queue()
+                .concurrent(10)
+                .retry(3)
+                .withWorker((data, done) => {
+                    upload(data)
+                        .then(() => done())
+                        .catch((reason) => {
+                            console.log(`Could not handle '${data.basedir}/${data.filename}'`);
+                            console.log(reason);
 
-            // assign a callbacks
-            q.drain = function() {
-                resolve();
-                console.log('Finished');
-            };
+                            if ('statusCode' in reason) {
+                                var result = handleStatus(reason.statusCode, reason.headers);
+                                if (result.abort) {
+                                    // somehow abort this whole queue thingy 
+                                } else {
+                                    done(result.delay);
+                                }
+                            }
+                            else {
+                                done();
+                            }
+                        });
+                })
+                .onDrain(() => {
+                    resolve();
+                });
 
-            q.error = function(err) {
-                console.log(err);
-            };
-
-            q.success = function(data) {
-                // console.log('Job ' + this + ' successfully finished. Result is ' + data);
-            }
-
-            var folders = dirsAndFiles("/Users/arjen/Downloads", "/Users/arjen/Downloads", { mode: Mode.Directory });
+            var folders = dirsAndFiles("/Users/arjen/Downloads", "/Users/arjen/Downloads", { mode: Mode.Directory, pattern: /\.pdf$/ });
             for(var file of folders) {
-                q.push({file: file});
+                queue.enqueue(file);
             }
 
-            var files = dirsAndFiles("/Users/arjen/Downloads", "/Users/arjen/Downloads", { mode: Mode.File });
+            var files = dirsAndFiles("/Users/arjen/Downloads", "/Users/arjen/Downloads", { mode: Mode.File, pattern: /\.pdf$/ });
             for(var file of files) {
-                q.push({file: file});
+                queue.enqueue(file);
             }
         });
     }
-    await api.loadAccessToken();
-    await go();
 
-    // await api.loadAccessToken()
-    //     .then(async () => { // , { pattern: /DeepL\.dmg$/ }
-    //         var files = dirsAndFiles("/Users/arjen/Downloads", "/Users/arjen/Downloads");
-    //         var file = files.next();
-
-    //         while (!file.done) {
-    //             await upload(file.value);
-    //             file = files.next();
-    //         }
-    //     })
-    //     .catch((error) => console.log(error));
+    await api.loadAccessToken()
+        .then(() => goNew());
 
 })().then(() => {
     console.log("done");
