@@ -3,8 +3,29 @@ import * as path from 'path';
 import { Config } from './config/config';
 import { OneDriveApi } from './onedrive';
 import { IncomingHttpHeaders } from 'http';
+import yargs = require('yargs')
 
 const type = require('easytype');
+
+var argv = yargs
+    .usage('Usage: $0 <command> [options]')
+    .command('upload', 'Upload files to OneDrive')
+    .example('$0 upload -p /users/me/upload', 'upload files in the given path')
+    .example('$0 upload -p /users/me/upload --pattern "/\.pdf$/"', 'upload only files with extension .pdf in the given path')
+
+    .alias('p', 'path')
+    .nargs('p', 1)
+    .describe('p', 'Path to upload')
+    .demandOption(['p'])
+
+    .alias('e', 'pattern')
+    .nargs('e', 1)
+    .describe('e', 'RegEx pattern on files to upload')
+
+    .help('h')
+    .alias('h', 'help')
+    .epilog('copyright 2019')
+    .argv;
 
 function relativePath(basePath: string, absolutePath: string) {
     if (absolutePath.startsWith(basePath)) {
@@ -237,9 +258,9 @@ export class Queue {
     const config = new Config();
     const api = new OneDriveApi(config);
 
-    async function upload(file: FileObject) {
+    async function upload(basedir: string, file: FileObject) {
         if (file.isFile) {
-            await api.uploadFile('/Users/arjen/Downloads', file.path);
+            await api.uploadFile(basedir, file.path);
         } else {
             await api.createFolder(file.basedir, file.filename);
         }
@@ -286,15 +307,25 @@ export class Queue {
         }
     }
 
+    function str2Regex(s) {
+        return new RegExp(s.match(/\/(.+)\/.*/)[1], s.match(/\/.+\/(.*)/)[1]);
+    }
 
-    async function goNew() {
+    const basedir = argv.p as string;
+    var pattern: RegExp | undefined = undefined;
+
+    if (argv.e !== undefined) {
+        pattern = str2Regex(argv.e as string);
+    }
+
+    async function go() {
         return new Promise<void>((resolve) => {
             // create a queue object with worker and concurrency 2
             const queue = new Queue()
                 .concurrent(10)
                 .retry(3)
                 .withWorker((data, done) => {
-                    upload(data)
+                    upload(basedir, data)
                         .then(() => done())
                         .catch((reason) => {
                             console.log(`Could not handle '${data.basedir}/${data.filename}'`);
@@ -317,12 +348,12 @@ export class Queue {
                     resolve();
                 });
 
-            var folders = dirsAndFiles("/Users/arjen/Downloads", "/Users/arjen/Downloads", { mode: Mode.Directory, pattern: /\.pdf$/ });
+            var folders = dirsAndFiles(basedir, basedir, { mode: Mode.Directory, pattern: pattern });
             for(var file of folders) {
                 queue.enqueue(file);
             }
 
-            var files = dirsAndFiles("/Users/arjen/Downloads", "/Users/arjen/Downloads", { mode: Mode.File, pattern: /\.pdf$/ });
+            var files = dirsAndFiles(basedir, basedir, { mode: Mode.File, pattern: pattern });
             for(var file of files) {
                 queue.enqueue(file);
             }
@@ -330,7 +361,7 @@ export class Queue {
     }
 
     await api.loadAccessToken()
-        .then(() => goNew());
+        .then(() => go());
 
 })().then(() => {
     console.log("done");
