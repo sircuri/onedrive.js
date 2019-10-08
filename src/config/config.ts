@@ -35,10 +35,11 @@ export class Config implements IConfig {
     private _env: string;
     private _version: string;
 
-    constructor() {
-        this._env = process.env.NODE_ENV || "development";
+    constructor(configFile: string = "config.json") {
+        //this._env = process.env.NODE_ENV || "development";
 
-        var buffer = fs.readFileSync("config." + this._env + ".json");
+        //var buffer = fs.readFileSync("config." + this._env + ".json");
+        var buffer = fs.readFileSync(configFile);
         this._config = JSON.parse(buffer.toString());
         this._version = pkinfo.version;
 

@@ -15,4 +15,8 @@ COPY . .
 
 RUN npm run build:prod
 
-CMD [ "node", "./lib/index.js" ]
+# Create config dir
+RUN mkdir -p /config && mkdir -p /workdir
+VOLUME /config /workdir
+
+CMD [ "node", "./lib/index.js", "-f", "/config/config.json", "-p", "/workdir" ]

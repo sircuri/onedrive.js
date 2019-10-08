@@ -6,7 +6,7 @@
   "types": "lib/index",
   "scripts": {
     "start": "npm run build:live",
-    "build:live": "nodemon --exec ./node_modules/.bin/ts-node -- ./src/index.ts upload -p /Users/arjen/Downloads -e '/.dmg$/'",
+    "build:live": "nodemon --exec ./node_modules/.bin/ts-node -- ./src/index.ts upload -f config.development.json -p /Users/arjen/Downloads -e '/.dmg$/'",
     "build:prod": "tsc",
     "run:live": "node ./lib/index.js"
   },

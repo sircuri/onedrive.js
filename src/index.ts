@@ -13,11 +13,13 @@ var argv = yargs
     .example('$0 upload -p /users/me/upload', 'upload files in the given path')
     .example('$0 upload -p /users/me/upload --pattern "/\.pdf$/"', 'upload only files with extension .pdf in the given path')
 
+    .alias('f', 'file')
+    .nargs('f', 1)
+    .describe('f', 'Config file')
     .alias('p', 'path')
     .nargs('p', 1)
     .describe('p', 'Path to upload')
-    .demandOption(['p'])
-
+    .demandOption(['p', 'f'])
     .alias('e', 'pattern')
     .nargs('e', 1)
     .describe('e', 'RegEx pattern on files to upload')
@@ -255,7 +257,15 @@ export class Queue {
 
 (async () => {
 
-    const config = new Config();
+    const basedir = argv.p as string;
+    const configfile = argv.f as string;
+    var pattern: RegExp | undefined = undefined;
+
+    if (argv.e !== undefined) {
+        pattern = str2Regex(argv.e as string);
+    }
+
+    const config = new Config(configfile);
     const api = new OneDriveApi(config);
 
     async function upload(basedir: string, file: FileObject) {
@@ -309,13 +319,6 @@ export class Queue {
 
     function str2Regex(s) {
         return new RegExp(s.match(/\/(.+)\/.*/)[1], s.match(/\/.+\/(.*)/)[1]);
-    }
-
-    const basedir = argv.p as string;
-    var pattern: RegExp | undefined = undefined;
-
-    if (argv.e !== undefined) {
-        pattern = str2Regex(argv.e as string);
     }
 
     async function go() {
