@@ -1,6 +1,5 @@
 {
     "http": {
-      "port": "8000",
       "host": "localhost"
     },
     "onedrive": {

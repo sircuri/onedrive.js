@@ -19,4 +19,6 @@ RUN npm run build:prod
 RUN mkdir -p /config && mkdir -p /workdir
 VOLUME /config /workdir
 
+EXPOSE 8001
+
 CMD [ "node", "./lib/index.js", "-f", "/config/config.json", "-p", "/workdir" ]

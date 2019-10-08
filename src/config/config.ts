@@ -51,7 +51,10 @@ export class Config implements IConfig {
     }
 
     http(): IHttpSection {
-        return this._config.http;
+        return {
+            host: this._config.http.host,
+            port: 8001
+        };
     }
 
     onedrive(): IOneDriveSection {
