@@ -1,6 +1,6 @@
 {
   "name": "onedrive.js",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Onedrive REST Client",
   "main": "lib/index",
   "types": "lib/index",
