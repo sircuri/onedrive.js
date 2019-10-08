@@ -2,6 +2,7 @@ import * as fs from 'fs';
 const pkinfo = require('../../package.json');
 
 export interface IHttpSection {
+    external: string,
     port: number,
     host: string
 }
@@ -51,10 +52,7 @@ export class Config implements IConfig {
     }
 
     http(): IHttpSection {
-        return {
-            host: this._config.http.host,
-            port: 8001
-        };
+        return this._config.http;
     }
 
     onedrive(): IOneDriveSection {

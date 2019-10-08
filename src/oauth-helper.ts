@@ -22,7 +22,7 @@ export class OAuthClientCallback {
 
       router.get('/auth', (req, res) => {
         const authorizationUri = this.oauthClient.authorizationCode.authorizeURL({
-          redirect_uri: 'http://' + this.config.http().host + ':' + this.config.http().port + '/callback',
+          redirect_uri: this.config.http().external + '/callback',
           scope: ['Files.ReadWrite', 'Files.ReadWrite.all', 'Sites.ReadWrite.All', 'offline_access']
         });
         res.redirect(authorizationUri);
@@ -34,7 +34,7 @@ export class OAuthClientCallback {
           try {
             var result = await this.oauthClient.authorizationCode.getToken({
               code: auth_code,
-              redirect_uri: 'http://' + this.config.http().host + ':' + this.config.http().port + '/callback',
+              redirect_uri: this.config.http().external + '/callback',
             });
   
             const token = this.oauthClient.accessToken.create(result);
@@ -72,7 +72,7 @@ export class OAuthClientCallback {
       const port = this.config.http().port;
       var listener = server.listen(port, () => {
         console.log('Running callback OAuthClient on port %s', port);
-        console.log('Point your browser to http://' + this.config.http().host + ':' + this.config.http().port + '/auth');
+        console.log('Point your browser to ' + this.config.http().external + '/auth');
       });
 
       listener.on('connection', (socket) => {

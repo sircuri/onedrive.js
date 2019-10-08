@@ -1,5 +1,7 @@
 {
     "http": {
+      "external": "http://localhost:8001",
+      "port": 8001,
       "host": "localhost"
     },
     "onedrive": {
