@@ -1,12 +1,12 @@
 {
   "name": "onedrive.js",
-  "version": "0.9.1",
+  "version": "1.0.1",
   "description": "Onedrive REST Client",
   "main": "lib/index",
   "types": "lib/index",
   "scripts": {
     "start": "npm run build:live",
-    "build:live": "nodemon --exec ./node_modules/.bin/ts-node -- ./src/index.ts upload -f config.development.json -p /Users/arjen/Downloads -e '/.dmg$/'",
+    "build:live": "nodemon --exec ./node_modules/.bin/ts-node -- ./src/index.ts upload -f config.development.json -p /Users/arjen/Downloads -e '/^LSL.zip$/'",
     "build:prod": "tsc",
     "run:live": "node ./lib/index.js"
   },
