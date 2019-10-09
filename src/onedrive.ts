@@ -13,8 +13,6 @@ const isDate = require('date-fns/isDate');
 const parseISO = require('date-fns/parseISO');
 const cliProgress = require('cli-progress');
 
-const hash = crypto.createHash('sha256');
-
 export interface NextExpectedRange {
     from: number;
     till?: number;
@@ -38,6 +36,7 @@ export class UploadSession {
         //     clearOnComplete: false
         // });
 
+        const hash = crypto.createHash('sha256');
         hash.update(filename);
         this.sha256HexHash = hash.digest('hex');
 
