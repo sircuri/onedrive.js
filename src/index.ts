@@ -39,13 +39,6 @@ function relativePath(basePath: string, absolutePath: string) {
     }
 }
 
-function convertbytes(bytes: number): string {
-    if (bytes > 1073741824) return `${Math.floor(bytes / 1073741824)}.${Math.floor(bytes % 1073741824 / 10000000)}G`;
-    if (bytes > 1048576) return `${Math.floor(bytes / 1048576)}.${Math.floor(bytes % 1048576 / 10000)}M`;
-    if (bytes > 1024) return `${Math.floor(bytes / 1024)}.${Math.floor(bytes % 1024 / 100)}K`;
-    else return `${bytes}`;
-}
-
 export interface FileObject {
     isFile: boolean;
     filename: string;

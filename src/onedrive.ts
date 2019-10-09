@@ -390,7 +390,7 @@ export class OneDriveApi {
             offset += this.offsetSize;
         }
         uploadSession.finish();
-        console.log(`Uploaded '${fullPath}'`)
+        console.log(`Uploaded '${fullPath}': ${this.convertbytes(bytesWritten)}`)
         //uploadSession.stop();
 
         return bytesWritten;
@@ -412,7 +412,7 @@ export class OneDriveApi {
                 this.put(options)
                     .then(data => {
                         var result = JSON.parse(data);
-                        console.log(`Uploaded '${fullPath}': ${result.size} bytes`)
+                        console.log(`Uploaded '${fullPath}': ${this.convertbytes(result.size)}`)
                         resolve(result.size as number);
                     })
                     .catch(reason => reject(reason));
@@ -421,6 +421,13 @@ export class OneDriveApi {
         });
     }
 
+    private convertbytes(bytes: number): string {
+        if (bytes > 1073741824) return `${Math.floor(bytes / 1073741824)}.${Math.floor(bytes % 1073741824 / 10000000)}G`;
+        if (bytes > 1048576) return `${Math.floor(bytes / 1048576)}.${Math.floor(bytes % 1048576 / 10000)}M`;
+        if (bytes > 1024) return `${Math.floor(bytes / 1024)}.${Math.floor(bytes % 1024 / 100)}K`;
+        else return `${bytes}`;
+    }
+    
     public async uploadFile(basePath: string, filePath: string) {
         return new Promise<number>((resolve, reject) => {
             const maxUploadSize = 4 * 1024 * 1024;
