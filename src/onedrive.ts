@@ -396,21 +396,54 @@ export class OneDriveApi {
         return bytesWritten;
     }
 
+    public async uploadSingleFile(fullPath: string, filePath: string) {
+        return new Promise<number>((resolve, reject) => {
+            fs.readFile(fullPath, (err, data) => {
+                if (err) reject(err);
+
+                const options = {
+                    url: this.itemByPathUrl + ':' + this.destinationPath + '/' + encodeURI(filePath) + ':/content',
+                    headers: {
+                        'Authorization': this.accessToken.token.access_token,
+                    },
+                    body: data
+                };
+    
+                this.put(options)
+                    .then(data => {
+                        var result = JSON.parse(data);
+                        console.log(`Uploaded '${fullPath}': ${result.size} bytes`)
+                        resolve(result.size as number);
+                    })
+                    .catch(reason => reject(reason));
+            });
+
+        });
+    }
+
     public async uploadFile(basePath: string, filePath: string) {
         return new Promise<number>((resolve, reject) => {
+            const maxUploadSize = 4 * 1024 * 1024;
             const fullPath = join(basePath, filePath);
             const stats = fs.statSync(fullPath);
 
-            this.verifyAccessToken()
-                .then(() => this.createUploadSession(filePath, {
-                    "@odata.type": "microsoft.graph.fileSystemInfo",
-                    "createdDateTime": stats.ctime,
-                    "lastAccessedDateTime": stats.atime,
-                    "lastModifiedDateTime": stats.mtime
-                }))
-                .then(uploadSession => this.uploadFileToSession(uploadSession, fullPath, stats))
-                .then(bytesWritten => resolve(bytesWritten))
-                .catch(reason => reject(reason))
+            if (stats.size < maxUploadSize) {
+                this.verifyAccessToken()
+                    .then(() => this.uploadSingleFile(fullPath, filePath))
+                    .then(bytesWritten => resolve(bytesWritten))
+                    .catch(reason => reject(reason))
+            } else {
+                this.verifyAccessToken()
+                    .then(() => this.createUploadSession(filePath, {
+                        "@odata.type": "microsoft.graph.fileSystemInfo",
+                        "createdDateTime": stats.ctime,
+                        "lastAccessedDateTime": stats.atime,
+                        "lastModifiedDateTime": stats.mtime
+                    }))
+                    .then(uploadSession => this.uploadFileToSession(uploadSession, fullPath, stats))
+                    .then(bytesWritten => resolve(bytesWritten))
+                    .catch(reason => reject(reason))
+            }
         });
     }
 
