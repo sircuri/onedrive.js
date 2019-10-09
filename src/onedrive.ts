@@ -8,9 +8,12 @@ import { create } from 'simple-oauth2';
 import { OAuthClientCallback } from './oauth-helper';
 import { basename, join } from 'path';
 
+const crypto = require('crypto');
 const isDate = require('date-fns/isDate');
 const parseISO = require('date-fns/parseISO');
 const cliProgress = require('cli-progress');
+
+const hash = crypto.createHash('sha256');
 
 export interface NextExpectedRange {
     from: number;
@@ -19,19 +22,33 @@ export interface NextExpectedRange {
 
 export class UploadSession {
     expirationDateTime: Date;
-    nextExpectedRanges: NextExpectedRange[];
+    nextExpectedRanges: string[] = [];
+    // nextExpectedRanges: NextExpectedRange[];
     uploadUrl: string;
     progressBar: any;
- 
-    constructor(private filename: string, data: any) {
-        this.progressBar = new cliProgress.SingleBar({}, {
-            format: '| {bar} | {filename} | {value}/{total} {unit} || Speed: {speed}',
-            barCompleteChar: '\u2588',
-            barIncompleteChar: '\u2591',
-            hideCursor: true,
-            clearOnComplete: false
-        });
+    sha256HexHash: string;
+    resumable: boolean = false;
 
+    constructor(private filename: string) {
+        // this.progressBar = new cliProgress.SingleBar({}, {
+        //     format: '| {bar} | {filename} | {value}/{total} {unit} || Speed: {speed}',
+        //     barCompleteChar: '\u2588',
+        //     barIncompleteChar: '\u2591',
+        //     hideCursor: true,
+        //     clearOnComplete: false
+        // });
+
+        hash.update(filename);
+        this.sha256HexHash = hash.digest('hex');
+
+        if (fs.existsSync('/tmp/onedrive/' + this.sha256HexHash)) {
+            var buffer = fs.readFileSync('/tmp/onedrive/' + this.sha256HexHash);
+            this.setData(JSON.parse(buffer.toString()), false);
+            this.resumable = true;
+        }
+    }
+
+    setData(data: any, store: boolean = true) {
         if ('expirationDateTime' in data) {
             if (!isDate(data.expirationDateTime)) {
                 this.expirationDateTime = parseISO(data.expirationDateTime);
@@ -40,18 +57,48 @@ export class UploadSession {
             }
         }
         if ('nextExpectedRanges' in data) {
-            const ranges: string[] = data.nextExpectedRanges;
-            this.nextExpectedRanges = _.map(ranges, (range) => {
-                var parts = range.split("-");
-                if (parts.length > 1) {
-                    return { from: parseInt(parts[0]), till: parseInt(parts[1]) };
-                } else {
-                    return { from: parseInt(parts[0]) };
-                }
-            });
+            this.nextExpectedRanges = data.nextExpectedRanges as string[]; 
+            // const ranges: string[] = data.nextExpectedRanges;
+            // this.nextExpectedRanges = _.map(ranges, (range) => {
+            //     var parts = range.split("-");
+            //     if (parts.length > 1) {
+            //         return { from: parseInt(parts[0]), till: parseInt(parts[1]) };
+            //     } else {
+            //         return { from: parseInt(parts[0]) };
+            //     }
+            // });
         }
         if ('uploadUrl' in data) {
             this.uploadUrl = data.uploadUrl;
+        }
+
+        if (store) {
+            if (!fs.existsSync('/tmp/onedrive')) {
+                fs.mkdirSync('/tmp/onedrive', {
+                    recursive: true
+                });
+            }
+
+            fs.writeFileSync('/tmp/onedrive/' + this.sha256HexHash, JSON.stringify(this, null, 2));
+        }
+    }
+
+    startPosition(): number {
+        if (this.nextExpectedRanges.length > 0) {
+            return parseInt(this.nextExpectedRanges[0].split("-")[0]);
+        }
+
+        return 0;
+    }
+
+    finish() {
+        if (fs.existsSync('/tmp/onedrive/' + this.sha256HexHash)) {
+            try {
+                fs.unlinkSync('/tmp/onedrive/' + this.sha256HexHash)
+                //file removed
+            } catch (err) {
+                console.error(err)
+            }
         }
     }
 
@@ -199,8 +246,8 @@ export class OneDriveApi {
             };
 
             this.get(options)
-                .then((data) => resolve(JSON.parse(data)))
-                .catch((reason) => reject(reason))
+                .then(data => resolve(JSON.parse(data)))
+                .catch(reason => reject(reason))
         });
     }
 
@@ -215,14 +262,14 @@ export class OneDriveApi {
                     request.get(options, (error, response, data) => {
                         if (error) reject(error);
                         else if (!this.isSuccess(response)) reject({
-                                statusCode: response.statusCode,
-                                headers: response.headers,
-                                data: data
-                            });
+                            statusCode: response.statusCode,
+                            headers: response.headers,
+                            data: data
+                        });
                         else resolve(data);
                     });
                 })
-                .catch((error) => reject(error));
+                .catch(error => reject(error));
         });
     }
 
@@ -240,7 +287,7 @@ export class OneDriveApi {
                         else resolve(data);
                     });
                 })
-                .catch((error) => reject(error));
+                .catch(error => reject(error));
         });
     }
 
@@ -258,30 +305,49 @@ export class OneDriveApi {
                         else resolve(data);
                     });
                 })
-                .catch((error) => reject(error));
+                .catch(error => reject(error));
         });
     }
 
     public async createUploadSession(filePath: string, fileSystemInfo: any) {
         // TODO: Store upload session for resume
         return new Promise<UploadSession>((resolve, reject) => {
-            const options = {
-                url: this.itemByPathUrl + ':' + this.destinationPath + '/' + encodeURI(filePath) + ':/createUploadSession',
-                headers: {
-                    'Authorization': this.accessToken.token.access_token,
-                },
-                json: {
-                    "item": {
-                        "@odata.type": "microsoft.graph.driveItemUploadableProperties",
-                        "@microsoft.graph.conflictBehavior": "replace",
-                        "name": basename(filePath),
-                        "fileSystemInfo": fileSystemInfo
+            var session = new UploadSession(filePath);
+            if (!session.resumable) {
+                const options = {
+                    url: this.itemByPathUrl + ':' + this.destinationPath + '/' + encodeURI(filePath) + ':/createUploadSession',
+                    headers: {
+                        'Authorization': this.accessToken.token.access_token,
+                    },
+                    json: {
+                        "item": {
+                            "@odata.type": "microsoft.graph.driveItemUploadableProperties",
+                            "@microsoft.graph.conflictBehavior": "replace",
+                            "name": basename(filePath),
+                            "fileSystemInfo": fileSystemInfo
+                        }
                     }
-                }
-            };
-            this.post(options)
-                .then((data) => resolve(new UploadSession(basename(filePath), data)))
-                .catch((reason) => reject(reason))
+                };
+                this.post(options)
+                    .then(data => {
+                        session.setData(data);
+                        resolve(session);
+                    })
+                    .catch(reason => reject(reason));
+            } else {
+                const options = {
+                    url: session.uploadUrl,
+                    headers: {
+                        'Authorization': this.accessToken.token.access_token,
+                    }
+                };
+                this.get(options)
+                    .then(data => {
+                        session.setData(JSON.parse(data));
+                        resolve(session);
+                    })
+                    .catch(reason => reject(reason));
+            }
         });
     }
 
@@ -313,7 +379,8 @@ export class OneDriveApi {
         //uploadSession.start(stats.size);
 
         var offset = 0;
-        var readStream = fs.createReadStream(fullPath);
+        var startPosition = uploadSession.startPosition();
+        var readStream = fs.createReadStream(fullPath, { start: startPosition });
         var fixedSizeTransform = new FixedChunkSizeTransform(this.offsetSize);
         readStream.pipe(fixedSizeTransform);
 
@@ -323,6 +390,7 @@ export class OneDriveApi {
             //uploadSession.update(bytesWritten);
             offset += this.offsetSize;
         }
+        uploadSession.finish();
         console.log(`Uploaded '${fullPath}'`)
         //uploadSession.stop();
 
@@ -335,15 +403,15 @@ export class OneDriveApi {
             const stats = fs.statSync(fullPath);
 
             this.verifyAccessToken()
-            .then(() => this.createUploadSession(filePath, {
-                "@odata.type": "microsoft.graph.fileSystemInfo",
-                "createdDateTime": stats.ctime,
-                "lastAccessedDateTime": stats.atime,
-                "lastModifiedDateTime": stats.mtime
-            }))
-            .then(uploadSession => this.uploadFileToSession(uploadSession, fullPath, stats))
-            .then((bytesWritten) => resolve(bytesWritten))
-            .catch((reason) => reject(reason))
+                .then(() => this.createUploadSession(filePath, {
+                    "@odata.type": "microsoft.graph.fileSystemInfo",
+                    "createdDateTime": stats.ctime,
+                    "lastAccessedDateTime": stats.atime,
+                    "lastModifiedDateTime": stats.mtime
+                }))
+                .then(uploadSession => this.uploadFileToSession(uploadSession, fullPath, stats))
+                .then(bytesWritten => resolve(bytesWritten))
+                .catch(reason => reject(reason))
         });
     }
 
@@ -363,7 +431,7 @@ export class OneDriveApi {
                 }
             };
             this.post(options)
-                .then((data) => {
+                .then(data => {
                     console.log(`Created folder '${fullPath}/${folderName}'`)
                     resolve(data);
                 })
