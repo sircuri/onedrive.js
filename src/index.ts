@@ -223,6 +223,12 @@ export class Queue {
     }
 }
 
+var process = require('process')
+process.on('SIGINT', () => {
+  console.info("Interrupted")
+  process.exit(0)
+});
+
 (async () => {
 
     const basedir = argv.p as string;
