@@ -299,7 +299,7 @@ export class Queue {
                     upload(basedir, data)
                         .then(() => done())
                         .catch((reason) => {
-                            console.log(`Could not handle '${data.basedir}/${data.filename}'`);
+                            console.log(`Could not handle '${path.join(data.basedir, data.filename)}'`);
                             console.log(reason);
 
                             if ('statusCode' in reason) {
@@ -332,10 +332,11 @@ export class Queue {
     }
 
     await api.loadAccessToken()
-        .then(() => go());
+        .then(() => go())
+        .then(() => api.completeSession());
 
 })().then(() => {
-    console.log("done");
+    //console.log("done");
 }).catch(e => {
     // Deal with the fact the chain failed
     console.log(e);

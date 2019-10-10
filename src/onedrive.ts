@@ -13,6 +13,14 @@ const isDate = require('date-fns/isDate');
 const parseISO = require('date-fns/parseISO');
 const cliProgress = require('cli-progress');
 
+const progressBar = new cliProgress.MultiBar({
+    format: '{bar} | {filename} | {value}/{total} {unit} || Speed: {speed}',
+    barCompleteChar: '\u2588',
+    barIncompleteChar: '\u2591',
+    hideCursor: true,
+    clearOnComplete: true,
+    stopOnComplete: true
+});
 export interface NextExpectedRange {
     from: number;
     till?: number;
@@ -21,21 +29,12 @@ export interface NextExpectedRange {
 export class UploadSession {
     expirationDateTime: Date;
     nextExpectedRanges: string[] = [];
-    // nextExpectedRanges: NextExpectedRange[];
     uploadUrl: string;
-    progressBar: any;
+    bar: any;
     sha256HexHash: string;
     resumable: boolean = false;
 
     constructor(private filename: string) {
-        // this.progressBar = new cliProgress.SingleBar({}, {
-        //     format: '| {bar} | {filename} | {value}/{total} {unit} || Speed: {speed}',
-        //     barCompleteChar: '\u2588',
-        //     barIncompleteChar: '\u2591',
-        //     hideCursor: true,
-        //     clearOnComplete: false
-        // });
-
         const hash = crypto.createHash('sha256');
         hash.update(filename);
         this.sha256HexHash = hash.digest('hex');
@@ -57,15 +56,6 @@ export class UploadSession {
         }
         if ('nextExpectedRanges' in data) {
             this.nextExpectedRanges = data.nextExpectedRanges as string[]; 
-            // const ranges: string[] = data.nextExpectedRanges;
-            // this.nextExpectedRanges = _.map(ranges, (range) => {
-            //     var parts = range.split("-");
-            //     if (parts.length > 1) {
-            //         return { from: parseInt(parts[0]), till: parseInt(parts[1]) };
-            //     } else {
-            //         return { from: parseInt(parts[0]) };
-            //     }
-            // });
         }
         if ('uploadUrl' in data) {
             this.uploadUrl = data.uploadUrl;
@@ -84,7 +74,11 @@ export class UploadSession {
 
     startPosition(): number {
         if (this.nextExpectedRanges.length > 0) {
-            return parseInt(this.nextExpectedRanges[0].split("-")[0]);
+            const pos = parseInt(this.nextExpectedRanges[0].split("-")[0]);
+            if (pos > 0) {
+                console.log(this.nextExpectedRanges);
+            }
+            return pos;
         }
 
         return 0;
@@ -106,7 +100,7 @@ export class UploadSession {
         if (this.filename.length > 25) this.filename = this.filename.substr(0, 25);
         else while (this.filename.length < 25) this.filename += ' ';
 
-        this.progressBar.start(totalValue, 0, {
+        this.bar = progressBar.create(totalValue, 0, {
             filename: this.filename,
             speed: 'N/A',
             unit: 'bytes'
@@ -114,13 +108,15 @@ export class UploadSession {
     }
 
     update(newValue: number) {
-        // update the current value in your application..
-        this.progressBar.update(newValue);
-    }
+        if (this.filename.length > 25) this.filename = this.filename.substr(0, 25);
+        else while (this.filename.length < 25) this.filename += ' ';
 
-    stop() {
-        // stop the progress bar
-        this.progressBar.stop();
+        // update the current value in your application..
+        this.bar.update(newValue, {
+            filename: this.filename,
+            speed: 'N/A',
+            unit: 'bytes'
+        });
     }
 }
 
@@ -363,7 +359,10 @@ export class OneDriveApi {
             };
             this.put(options)
                 .then((_) => resolve(chunk.length))
-                .catch((reason) => reject(reason))
+                .catch((reason) => {
+                    console.log(options);
+                    reject(reason);
+                });
         });
     }
 
@@ -375,7 +374,7 @@ export class OneDriveApi {
     }
 
     private async uploadFileToSession(uploadSession: UploadSession, fullPath: string, stats: fs.Stats) {
-        //uploadSession.start(stats.size);
+        uploadSession.start(stats.size);
 
         var offset = 0;
         var startPosition = uploadSession.startPosition();
@@ -386,18 +385,26 @@ export class OneDriveApi {
         var bytesWritten = 0;
         for await (const chunk of fixedSizeTransform) {
             bytesWritten += await this.uploadFragment(uploadSession.uploadUrl, offset, this.offsetSize, chunk, stats.size);
-            //uploadSession.update(bytesWritten);
+            uploadSession.update(bytesWritten);
             offset += this.offsetSize;
         }
         uploadSession.finish();
-        console.log(`Uploaded '${fullPath}': ${this.convertbytes(bytesWritten)}`)
-        //uploadSession.stop();
+        // console.log(`Uploaded '${fullPath}': ${this.convertbytes(bytesWritten)}`)
 
         return bytesWritten;
     }
 
-    public async uploadSingleFile(fullPath: string, filePath: string) {
+    public async uploadSingleFile(fullPath: string, filePath: string, totalSize: number) {
         return new Promise<number>((resolve, reject) => {
+            var filename = basename(filePath);
+            if (filename.length > 25) filename = filename.substr(0, 25);
+            else while (filename.length < 25) filename += ' ';
+            const b = progressBar.create(totalSize, 0, {
+                filename: filename,
+                speed: 'N/A',
+                unit: 'bytes'
+            });
+    
             fs.readFile(fullPath, (err, data) => {
                 if (err) reject(err);
 
@@ -412,7 +419,12 @@ export class OneDriveApi {
                 this.put(options)
                     .then(data => {
                         var result = JSON.parse(data);
-                        console.log(`Uploaded '${fullPath}': ${this.convertbytes(result.size)}`)
+                        //console.log(`Uploaded '${fullPath}': ${this.convertbytes(result.size)}`)
+                        b.update(result.size as number, {
+                            filename: filename,
+                            speed: 'N/A',
+                            unit: 'bytes'
+                        });
                         resolve(result.size as number);
                     })
                     .catch(reason => reject(reason));
@@ -436,7 +448,7 @@ export class OneDriveApi {
 
             if (stats.size < maxUploadSize) {
                 this.verifyAccessToken()
-                    .then(() => this.uploadSingleFile(fullPath, filePath))
+                    .then(() => this.uploadSingleFile(fullPath, filePath, stats.size))
                     .then(bytesWritten => resolve(bytesWritten))
                     .catch(reason => reject(reason))
             } else {
@@ -476,5 +488,9 @@ export class OneDriveApi {
                 })
                 .catch((reason) => reject(reason))
         });
+    }
+
+    completeSession() {
+        progressBar.stop();
     }
 }
