@@ -11,26 +11,82 @@ import { basename, join } from 'path';
 const crypto = require('crypto');
 const isDate = require('date-fns/isDate');
 const parseISO = require('date-fns/parseISO');
-const cliProgress = require('cli-progress');
 
-const progressBar = new cliProgress.MultiBar({
-    format: '{bar} | {filename} | {value}/{total} {unit} || Speed: {speed}',
-    barCompleteChar: '\u2588',
-    barIncompleteChar: '\u2591',
-    hideCursor: true,
-    clearOnComplete: true,
-    stopOnComplete: true
-});
 export interface NextExpectedRange {
     from: number;
     till?: number;
+}
+
+export interface ProgressBar {
+    id: number;
+    name: string;
+    current: number;
+    total: number;
+    completed: boolean;
+}
+
+export class ProgressComponent {
+    bars: ProgressBar[] = [];
+    timer: NodeJS.Timeout;
+
+    constructor(private size: number) {
+        for(var idx = 0; idx < size; idx++) {
+            this.bars.push({
+                id: idx,
+                name: '<none>',
+                current: 0,
+                total: 0,
+                completed: true
+            });
+        }
+
+        this.timer = setTimeout(this.render.bind(this), 1000);
+    }
+
+    render() {
+        const runningTasks = this.size - _.filter(this.bars, 'completed').length;
+        console.log(`Tasks active (${runningTasks} / ${this.size})`);
+        _.forEach(this.bars, (bar) => {
+            var perc = (bar.completed ? '-' : Math.ceil(bar.current / bar.total * 100)) + ' %';
+            while (perc.length < 5) perc = ' ' + perc;
+            console.log(`${bar.id}: ${perc} || ${bar.name}`);
+        });
+
+        this.timer = setTimeout(this.render.bind(this), 1000);
+    }
+
+    complete() {
+        clearTimeout(this.timer);
+    }
+
+    create(name: string, current: number, total: number): ProgressBar {
+        if (_.filter(this.bars, 'completed').length == 0) {
+            throw new Error("No room for new progress bar");
+        }
+
+        const elem = _.find(this.bars, 'completed') as ProgressBar;
+        elem.completed = false;
+        elem.current = current;
+        elem.total = total;
+        elem.name = name;
+
+        return elem;
+    }
+
+    update(id: number, current: number) {
+        this.bars[id].current = current;
+        this.bars[id].completed = (current == this.bars[id].total);
+
+        if (this.bars[id].completed) this.bars[id].name = '<none>';
+
+    }
 }
 
 export class UploadSession {
     expirationDateTime: Date;
     nextExpectedRanges: string[] = [];
     uploadUrl: string;
-    bar: any;
+    bar: ProgressBar;
     sha256HexHash: string;
     resumable: boolean = false;
 
@@ -96,27 +152,14 @@ export class UploadSession {
     }
 
     start(totalValue: number) {
-        // start the progress bar with a total value of 200 and start value of 0
         if (this.filename.length > 25) this.filename = this.filename.substr(0, 25);
         else while (this.filename.length < 25) this.filename += ' ';
 
-        this.bar = progressBar.create(totalValue, 0, {
-            filename: this.filename,
-            speed: 'N/A',
-            unit: 'bytes'
-        });
+        this.bar = progressBar.create(this.filename, 0, totalValue);
     }
 
     update(newValue: number) {
-        if (this.filename.length > 25) this.filename = this.filename.substr(0, 25);
-        else while (this.filename.length < 25) this.filename += ' ';
-
-        // update the current value in your application..
-        this.bar.update(newValue, {
-            filename: this.filename,
-            speed: 'N/A',
-            unit: 'bytes'
-        });
+        progressBar.update(this.bar.id, newValue);
     }
 }
 
@@ -168,6 +211,8 @@ export class FixedChunkSizeTransform extends Transform {
         callback();
     }
 }
+
+const progressBar = new ProgressComponent(10);
 
 export class OneDriveApi {
     private oauth2Client: OAuthClient;
@@ -376,13 +421,12 @@ export class OneDriveApi {
     private async uploadFileToSession(uploadSession: UploadSession, fullPath: string, stats: fs.Stats) {
         uploadSession.start(stats.size);
 
-        var offset = 0;
-        var startPosition = uploadSession.startPosition();
-        var readStream = fs.createReadStream(fullPath, { start: startPosition });
+        var offset = uploadSession.startPosition();
+        var readStream = fs.createReadStream(fullPath, { start: offset });
         var fixedSizeTransform = new FixedChunkSizeTransform(this.offsetSize);
         readStream.pipe(fixedSizeTransform);
 
-        var bytesWritten = 0;
+        var bytesWritten = offset;
         for await (const chunk of fixedSizeTransform) {
             bytesWritten += await this.uploadFragment(uploadSession.uploadUrl, offset, this.offsetSize, chunk, stats.size);
             uploadSession.update(bytesWritten);
@@ -399,11 +443,7 @@ export class OneDriveApi {
             var filename = basename(filePath);
             if (filename.length > 25) filename = filename.substr(0, 25);
             else while (filename.length < 25) filename += ' ';
-            const b = progressBar.create(totalSize, 0, {
-                filename: filename,
-                speed: 'N/A',
-                unit: 'bytes'
-            });
+            const b = progressBar.create(filename, 0, totalSize);
     
             fs.readFile(fullPath, (err, data) => {
                 if (err) reject(err);
@@ -420,11 +460,7 @@ export class OneDriveApi {
                     .then(data => {
                         var result = JSON.parse(data);
                         //console.log(`Uploaded '${fullPath}': ${this.convertbytes(result.size)}`)
-                        b.update(result.size as number, {
-                            filename: filename,
-                            speed: 'N/A',
-                            unit: 'bytes'
-                        });
+                        progressBar.update(b.id, result.size);
                         resolve(result.size as number);
                     })
                     .catch(reason => reject(reason));
@@ -491,6 +527,6 @@ export class OneDriveApi {
     }
 
     completeSession() {
-        progressBar.stop();
+        progressBar.complete();
     }
 }
