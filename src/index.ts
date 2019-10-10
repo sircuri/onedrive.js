@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import _ from 'lodash';
 import { Config } from './config/config';
 import { OneDriveApi } from './onedrive';
 import { IncomingHttpHeaders } from 'http';
@@ -97,6 +98,100 @@ function* dirsAndFiles(baseDir: string, dir: string, options?: { pattern?: RegEx
     }
 }
 
+interface ProgressBar {
+    id: number;
+    name: string;
+    current: number;
+    total: number;
+    completed: boolean;
+    _status: number;
+}
+
+export interface IProgress {
+    start(name: string, current: number, total: number): number;
+    update(id: number, current: number): void;
+}
+
+class ProgressComponent implements IProgress {
+    bars: ProgressBar[] = [];
+    timer: NodeJS.Timeout;
+    options = {};
+
+    constructor(private size: number) {
+        for(var idx = 0; idx < size; idx++) {
+            this.bars.push({
+                id: idx,
+                name: '<none>',
+                current: 0,
+                total: 0,
+                completed: true,
+                _status: 0
+            });
+        }
+
+        this.timer = setTimeout(this.render.bind(this), 1000);
+    }
+
+    setOptions(options: {}) {
+        this.options = options;
+    }
+
+    render() {
+        const status: string[] = [' ', '|', '/', '-', '\\'];
+        const runningTasks = this.size - _.filter(this.bars, 'completed').length;
+        console.log(`Tasks active (${runningTasks} / ${this.size})`);
+
+        _.forEach(this.bars, (bar) => {
+            var perc = (bar.completed ? '-' : Math.ceil(bar.current / bar.total * 100)) + ' %';
+            while (perc.length < 5) perc = ' ' + perc;
+
+            const fields = {
+                'task-id': bar.id,
+                'flow': status[bar._status],
+                'perc': perc,
+                'name': bar.name
+            };
+
+            const finalFields = {...fields, ...this.options};
+
+            console.log(`${bar.id}: ${perc} (${status[bar._status]}) || ${bar.name}`);
+        });
+
+        this.timer = setTimeout(this.render.bind(this), 1000);
+    }
+
+    complete() {
+        clearTimeout(this.timer);
+    }
+
+    start(name: string, current: number, total: number): number {
+        if (_.filter(this.bars, 'completed').length == 0) {
+            throw new Error("No room for new progress bar");
+        }
+
+        const elem = _.find(this.bars, 'completed') as ProgressBar;
+        elem.completed = false;
+        elem.current = current;
+        elem.total = total;
+        elem.name = name;
+
+        return elem.id;
+    }
+
+    update(id: number, current: number) {
+        this.bars[id].current = current;
+        this.bars[id].completed = (current == this.bars[id].total);
+
+        if (this.bars[id].completed) {
+            this.bars[id].name = '<none>';
+            this.bars[id]._status = 0;
+        } else {
+            this.bars[id]._status++;
+            if (this.bars[id]._status > 4) this.bars[id]._status = 1;
+        }
+    }
+}
+
 export interface JobData {
     data: any,
     retryCount: number;
@@ -111,7 +206,9 @@ export class Queue {
     private paused: boolean;
     private saturated: boolean;
     private buffer: number;
-    private worker: (job: any, callback:(err?: any, ...args: any[]) => void) => void;
+    private renderer: any;
+    private progress: ProgressComponent;
+    private worker: (job: any, progress: IProgress, callback:(err?: any, ...args: any[]) => void) => void;
 
     private waiting: JobData[] = [];
     private active: JobData[] = [];
@@ -132,6 +229,8 @@ export class Queue {
     public concurrent(max: number): Queue {
         this.maxTasks = max;
         this.buffer = Math.floor(max / 4);
+        this.progress = new ProgressComponent(max);
+
         return this;
     }
 
@@ -140,7 +239,13 @@ export class Queue {
         return this;
     }
 
-    public withWorker(worker: (job: any, callback:(err?: any, ...args: any[]) => void) => void) {
+    public withRenderer(options: any): Queue {
+        this.renderer = options;
+        this.progress.setOptions(options);
+        return this;
+    }
+
+    public withWorker(worker: (job: any, progress: IProgress, callback:(err?: any, ...args: any[]) => void) => void) {
         this.worker = worker;
         return this;
     }
@@ -160,7 +265,11 @@ export class Queue {
     }
 
     private _startJob() {
-        if(this.waiting.length === 0 && this.active.length === 0) this.drain();
+        if(this.waiting.length === 0 && this.active.length === 0)
+        {
+            this.progress.complete();
+            this.drain();
+        }
         if(this.paused || this.active.length >= this.maxTasks || this.waiting.length === 0) return;
 
         const job = this.waiting.shift() !;
@@ -175,7 +284,7 @@ export class Queue {
         let doneCalled = false;
         let delay = job.retryCount > 0 ? Math.floor(Math.random() * 3) + job.delay : 0;
 
-        setTimeout(this.worker.bind(this), delay, job.data, (err?: any, ...args: any[]) => {
+        setTimeout(this.worker.bind(this), delay, job.data, this.progress, (err?: any, ...args: any[]) => {
             if(doneCalled){
                 throw new Error('Callback can only be called once in the worker');
             } else {
@@ -242,11 +351,11 @@ process.on('SIGINT', () => {
     const config = new Config(configfile);
     const api = new OneDriveApi(config);
 
-    async function upload(basedir: string, file: FileObject) {
+    async function upload(basedir: string, file: FileObject, progress: IProgress) {
         if (file.isFile) {
-            await api.uploadFile(basedir, file.path);
+            await api.uploadFile(basedir, file.path, progress);
         } else {
-            await api.createFolder(file.basedir, file.filename);
+            await api.createFolder(file.basedir, file.filename, progress);
         }
     }
 
@@ -301,8 +410,11 @@ process.on('SIGINT', () => {
             const queue = new Queue()
                 .concurrent(10)
                 .retry(3)
-                .withWorker((data, done) => {
-                    upload(basedir, data)
+                .withRenderer({
+                    format: ''
+                })
+                .withWorker((data, progress, done) => {
+                    upload(basedir, data, progress)
                         .then(() => done())
                         .catch((reason) => {
                             console.log(`Could not handle '${path.join(data.basedir, data.filename)}'`);
@@ -338,11 +450,10 @@ process.on('SIGINT', () => {
     }
 
     await api.loadAccessToken()
-        .then(() => go())
-        .then(() => api.completeSession());
+        .then(() => go());
 
 })().then(() => {
-    //console.log("done");
+    console.log('Finished uploading all files');
 }).catch(e => {
     // Deal with the fact the chain failed
     console.log(e);

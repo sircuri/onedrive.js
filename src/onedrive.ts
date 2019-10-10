@@ -7,86 +7,17 @@ import { IConfig, IOneDriveSection } from './config/config';
 import { create } from 'simple-oauth2';
 import { OAuthClientCallback } from './oauth-helper';
 import { basename, join } from 'path';
+import { IProgress } from '.';
 
 const crypto = require('crypto');
 const isDate = require('date-fns/isDate');
 const parseISO = require('date-fns/parseISO');
 
-export interface NextExpectedRange {
-    from: number;
-    till?: number;
-}
-
-export interface ProgressBar {
-    id: number;
-    name: string;
-    current: number;
-    total: number;
-    completed: boolean;
-}
-
-export class ProgressComponent {
-    bars: ProgressBar[] = [];
-    timer: NodeJS.Timeout;
-
-    constructor(private size: number) {
-        for(var idx = 0; idx < size; idx++) {
-            this.bars.push({
-                id: idx,
-                name: '<none>',
-                current: 0,
-                total: 0,
-                completed: true
-            });
-        }
-
-        this.timer = setTimeout(this.render.bind(this), 1000);
-    }
-
-    render() {
-        const runningTasks = this.size - _.filter(this.bars, 'completed').length;
-        console.log(`Tasks active (${runningTasks} / ${this.size})`);
-        _.forEach(this.bars, (bar) => {
-            var perc = (bar.completed ? '-' : Math.ceil(bar.current / bar.total * 100)) + ' %';
-            while (perc.length < 5) perc = ' ' + perc;
-            console.log(`${bar.id}: ${perc} || ${bar.name}`);
-        });
-
-        this.timer = setTimeout(this.render.bind(this), 1000);
-    }
-
-    complete() {
-        clearTimeout(this.timer);
-    }
-
-    create(name: string, current: number, total: number): ProgressBar {
-        if (_.filter(this.bars, 'completed').length == 0) {
-            throw new Error("No room for new progress bar");
-        }
-
-        const elem = _.find(this.bars, 'completed') as ProgressBar;
-        elem.completed = false;
-        elem.current = current;
-        elem.total = total;
-        elem.name = name;
-
-        return elem;
-    }
-
-    update(id: number, current: number) {
-        this.bars[id].current = current;
-        this.bars[id].completed = (current == this.bars[id].total);
-
-        if (this.bars[id].completed) this.bars[id].name = '<none>';
-
-    }
-}
-
 export class UploadSession {
     expirationDateTime: Date;
     nextExpectedRanges: string[] = [];
     uploadUrl: string;
-    bar: ProgressBar;
+    bar: number;
     sha256HexHash: string;
     resumable: boolean = false;
 
@@ -151,15 +82,15 @@ export class UploadSession {
         }
     }
 
-    start(totalValue: number) {
+    start(totalValue: number, progress: IProgress) {
         if (this.filename.length > 25) this.filename = this.filename.substr(0, 25);
         else while (this.filename.length < 25) this.filename += ' ';
 
-        this.bar = progressBar.create(this.filename, 0, totalValue);
+        this.bar = progress.start(this.filename, this.startPosition(), totalValue);
     }
 
-    update(newValue: number) {
-        progressBar.update(this.bar.id, newValue);
+    update(newValue: number, progress: IProgress) {
+        progress.update(this.bar, newValue);
     }
 }
 
@@ -211,8 +142,6 @@ export class FixedChunkSizeTransform extends Transform {
         callback();
     }
 }
-
-const progressBar = new ProgressComponent(10);
 
 export class OneDriveApi {
     private oauth2Client: OAuthClient;
@@ -418,8 +347,8 @@ export class OneDriveApi {
         return Math.abs(closestTo - n1) < Math.abs(closestTo - n2) ? n1 : n2;
     }
 
-    private async uploadFileToSession(uploadSession: UploadSession, fullPath: string, stats: fs.Stats) {
-        uploadSession.start(stats.size);
+    private async uploadFileToSession(uploadSession: UploadSession, fullPath: string, stats: fs.Stats, progress: IProgress) {
+        uploadSession.start(stats.size, progress);
 
         var offset = uploadSession.startPosition();
         var readStream = fs.createReadStream(fullPath, { start: offset });
@@ -429,7 +358,7 @@ export class OneDriveApi {
         var bytesWritten = offset;
         for await (const chunk of fixedSizeTransform) {
             bytesWritten += await this.uploadFragment(uploadSession.uploadUrl, offset, this.offsetSize, chunk, stats.size);
-            uploadSession.update(bytesWritten);
+            uploadSession.update(bytesWritten, progress);
             offset += this.offsetSize;
         }
         uploadSession.finish();
@@ -438,12 +367,13 @@ export class OneDriveApi {
         return bytesWritten;
     }
 
-    public async uploadSingleFile(fullPath: string, filePath: string, totalSize: number) {
+    public async uploadSingleFile(fullPath: string, filePath: string, totalSize: number, progress: IProgress) {
         return new Promise<number>((resolve, reject) => {
             var filename = basename(filePath);
             if (filename.length > 25) filename = filename.substr(0, 25);
             else while (filename.length < 25) filename += ' ';
-            const b = progressBar.create(filename, 0, totalSize);
+
+            const id = progress.start(filename, 0, totalSize);
     
             fs.readFile(fullPath, (err, data) => {
                 if (err) reject(err);
@@ -460,7 +390,7 @@ export class OneDriveApi {
                     .then(data => {
                         var result = JSON.parse(data);
                         //console.log(`Uploaded '${fullPath}': ${this.convertbytes(result.size)}`)
-                        progressBar.update(b.id, result.size);
+                        progress.update(id, result.size);
                         resolve(result.size as number);
                     })
                     .catch(reason => reject(reason));
@@ -476,7 +406,7 @@ export class OneDriveApi {
         else return `${bytes}`;
     }
     
-    public async uploadFile(basePath: string, filePath: string) {
+    public async uploadFile(basePath: string, filePath: string, progress: IProgress) {
         return new Promise<number>((resolve, reject) => {
             const maxUploadSize = 4 * 1024 * 1024;
             const fullPath = join(basePath, filePath);
@@ -484,7 +414,7 @@ export class OneDriveApi {
 
             if (stats.size < maxUploadSize) {
                 this.verifyAccessToken()
-                    .then(() => this.uploadSingleFile(fullPath, filePath, stats.size))
+                    .then(() => this.uploadSingleFile(fullPath, filePath, stats.size, progress))
                     .then(bytesWritten => resolve(bytesWritten))
                     .catch(reason => reject(reason))
             } else {
@@ -495,16 +425,17 @@ export class OneDriveApi {
                         "lastAccessedDateTime": stats.atime,
                         "lastModifiedDateTime": stats.mtime
                     }))
-                    .then(uploadSession => this.uploadFileToSession(uploadSession, fullPath, stats))
+                    .then(uploadSession => this.uploadFileToSession(uploadSession, fullPath, stats, progress))
                     .then(bytesWritten => resolve(bytesWritten))
                     .catch(reason => reject(reason))
             }
         });
     }
 
-    public async createFolder(parentPath: string, folderName: string) {
+    public async createFolder(parentPath: string, folderName: string, progress: IProgress) {
         const fullPath = join(this.destinationPath, parentPath);
         return new Promise((resolve, reject) => {
+            const id = progress.start(`<${folderName}>`, 0, 100);
             const url = fullPath == '/' ? '/' : ':' + encodeURI(fullPath) + ':';
             const options = {
                 url: this.itemByPathUrl + url + '/children',
@@ -519,14 +450,11 @@ export class OneDriveApi {
             };
             this.post(options)
                 .then(data => {
-                    console.log(`Created folder '${fullPath}/${folderName}'`)
+                    //console.log(`Created folder '${fullPath}/${folderName}'`)
+                    progress.update(id, 100);
                     resolve(data);
                 })
                 .catch((reason) => reject(reason))
         });
-    }
-
-    completeSession() {
-        progressBar.complete();
     }
 }
