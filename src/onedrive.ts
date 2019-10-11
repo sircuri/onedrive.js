@@ -143,6 +143,43 @@ export class FixedChunkSizeTransform extends Transform {
     }
 }
 
+class FileInfo {
+    id: string;
+    createdDateTime: Date;
+    lastModifiedDateTime: Date;
+    size: number;
+
+    constructor(data: any) {
+        if ('id' in data)
+            this.id = data.id;
+        if ('fileSystemInfo' in data) {
+            const fsi = data.fileSystemInfo;
+            if ('createdDateTime' in fsi) {
+                if (!isDate(fsi.createdDateTime)) {
+                    this.createdDateTime = parseISO(fsi.createdDateTime);
+                } else {
+                    this.createdDateTime = fsi.createdDateTime;
+                }
+            }
+            if ('lastModifiedDateTime' in fsi) {
+                if (!isDate(fsi.lastModifiedDateTime)) {
+                    this.lastModifiedDateTime = parseISO(fsi.lastModifiedDateTime);
+                } else {
+                    this.lastModifiedDateTime = fsi.lastModifiedDateTime;
+                }
+            }
+        }
+        if ('size' in data)
+            this.size = data.size;
+    }
+
+    changed(stats: fs.Stats): boolean {
+        return this.size != stats.size || 
+               this.createdDateTime.getTime() != stats.ctime.getTime() || 
+               this.lastModifiedDateTime.getTime() != stats.mtime.getTime();
+    }
+}
+
 export class OneDriveApi {
     private oauth2Client: OAuthClient;
     private tokenFilePath: string;
@@ -203,21 +240,6 @@ export class OneDriveApi {
                 throw error;
             }
         }
-    }
-
-    public async getMeta(path: string): Promise<any> {
-        return new Promise((resolve, reject) => {
-            const options = {
-                url: this.itemByPathUrl + ':' + encodeURI(path),
-                headers: {
-                    'Authorization': this.accessToken.token.access_token
-                }
-            };
-
-            this.get(options)
-                .then(data => resolve(JSON.parse(data)))
-                .catch(reason => reject(reason))
-        });
     }
 
     private isSuccess(response: request.Response): boolean {
@@ -389,7 +411,6 @@ export class OneDriveApi {
                 this.put(options)
                     .then(data => {
                         var result = JSON.parse(data);
-                        //console.log(`Uploaded '${fullPath}': ${this.convertbytes(result.size)}`)
                         progress.update(id, result.size);
                         resolve(result.size as number);
                     })
@@ -406,6 +427,21 @@ export class OneDriveApi {
         else return `${bytes}`;
     }
     
+    public async getExistingFile(filePath: string) {
+        return new Promise<FileInfo>(resolve => {
+            const options = {
+                url: this.itemByPathUrl + ':' + this.destinationPath + '/' + encodeURI(filePath),
+                headers: {
+                    'Authorization': this.accessToken.token.access_token
+                }
+            };
+
+            this.get(options)
+                .then(data => resolve(new FileInfo(JSON.parse(data))))
+                .catch(_ => resolve(new FileInfo({})));
+        });
+    }
+
     public async uploadFile(basePath: string, filePath: string, progress: IProgress) {
         return new Promise<number>((resolve, reject) => {
             const maxUploadSize = 4 * 1024 * 1024;
@@ -419,15 +455,22 @@ export class OneDriveApi {
                     .catch(reason => reject(reason))
             } else {
                 this.verifyAccessToken()
-                    .then(() => this.createUploadSession(filePath, {
-                        "@odata.type": "microsoft.graph.fileSystemInfo",
-                        "createdDateTime": stats.ctime,
-                        "lastAccessedDateTime": stats.atime,
-                        "lastModifiedDateTime": stats.mtime
-                    }))
-                    .then(uploadSession => this.uploadFileToSession(uploadSession, fullPath, stats, progress))
+                    .then(() => this.getExistingFile(filePath))
+                    .then(fileInfo => {
+                        if (!fileInfo.changed(stats)) {
+                            throw new Error("File not changed.");
+                        }
+                        return this.createUploadSession(filePath, {
+                            "@odata.type": "microsoft.graph.fileSystemInfo",
+                            "createdDateTime": stats.ctime,
+                            "lastAccessedDateTime": stats.atime,
+                            "lastModifiedDateTime": stats.mtime
+                        })
+                    })
+                    .then(uploadSession => this.uploadFileToSession(uploadSession, fullPath, stats, progress), 
+                          _ => 0)
                     .then(bytesWritten => resolve(bytesWritten))
-                    .catch(reason => reject(reason))
+                    .catch(reason => {console.log(reason); reject(reason);})
             }
         });
     }
@@ -450,7 +493,6 @@ export class OneDriveApi {
             };
             this.post(options)
                 .then(data => {
-                    //console.log(`Created folder '${fullPath}/${folderName}'`)
                     progress.update(id, 100);
                     resolve(data);
                 })
