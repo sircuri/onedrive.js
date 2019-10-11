@@ -10,6 +10,7 @@ export interface IOneDriveSection {
     authentication: IAuthenticationSection;
     fragmentSizeMB: number;
     destinationPath: string;
+    simpleUploadSmallFiles: boolean;
 }
 
 export interface IAuthenticationSection {

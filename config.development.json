@@ -10,6 +10,7 @@
         "tokenFilePath": "/tmp/onedrive.token.json"
       },
       "fragmentSizeMB": 4,
-      "destinationPath": "/test"
+      "destinationPath": "/test",
+      "simpleUploadSmallFiles": false
     }
   }

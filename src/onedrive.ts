@@ -412,7 +412,7 @@ export class OneDriveApi {
             const fullPath = join(basePath, filePath);
             const stats = fs.statSync(fullPath);
 
-            if (stats.size < maxUploadSize) {
+            if (this.oneDriveConfig.simpleUploadSmallFiles && stats.size < maxUploadSize) {
                 this.verifyAccessToken()
                     .then(() => this.uploadSingleFile(fullPath, filePath, stats.size, progress))
                     .then(bytesWritten => resolve(bytesWritten))
