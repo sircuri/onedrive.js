@@ -1,8 +1,7 @@
 {
     "http": {
       "external": "http://localhost:8000",
-      "port": 8000,
-      "host": "localhost"
+      "port": 8000
     },
     "onedrive": {
       "authentication": {

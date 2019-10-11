@@ -3,8 +3,7 @@ const pkinfo = require('../../package.json');
 
 export interface IHttpSection {
     external: string,
-    port: number,
-    host: string
+    port: number
 }
 
 export interface IOneDriveSection {
