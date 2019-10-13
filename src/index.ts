@@ -55,30 +55,59 @@ enum Mode {
     Directory,
 }
 
-function* dirsAndFiles(baseDir: string, dir: string, options?: { pattern?: RegExp, mode?: Mode }): Generator<FileObject> {
+function assertFilePath(fullPath: string): void {
+    const fileFormat = /[\/\\*<>?:|]/;
+    const filename = path.basename(fullPath);
+    if (fileFormat.test(filename) || filename.startsWith(' ') || filename.endsWith('.')) {
+        throw new Error(`Illegal filename '${fullPath}'`);
+    }
+
+    fs.accessSync(fullPath, fs.constants.R_OK);
+}
+
+function* files(baseDir: string, options?: { pattern?: RegExp, mode?: Mode }): Generator<FileObject> {
+    const stat: fs.Stats = fs.statSync(baseDir);
+
+    try {
+        if (stat.isFile()) {
+            assertFilePath(baseDir);
+            const _filePath = path.basename(baseDir);
+            var fileObject = {
+                isFile: stat.isFile(),
+                filename: _filePath,
+                size: stat.size,
+                path: path.join('/', _filePath),
+                basedir: '/',
+                absolutePath: _filePath
+            };
+            yield fileObject;        
+        } else {
+            yield* __files(baseDir, baseDir, options);
+        }
+    } catch (err) {
+        console.error(err.name + ': ' + err.message);
+    }
+}
+
+function* __files(baseDir: string, currentDir: string, options?: { pattern?: RegExp, mode?: Mode }): Generator<FileObject> {
     const filePattern: RegExp | undefined = options !== undefined ? options.pattern : undefined;
     const mode: Mode = options !== undefined ? (options.mode !== undefined ? options.mode : Mode.Both) : Mode.Both;
 
-    const fileFormat = /[\/\\*<>?:|]/;
-    const files = fs.readdirSync(dir);
+    const files = fs.readdirSync(currentDir);
     for (const file of files) {
         if (filePattern !== undefined && !filePattern.test(file))
             continue;
 
-        const filepath = path.join(dir, file);
+        const filepath = path.join(currentDir, file);
 
         try {
-            if (fileFormat.test(file) || file.endsWith('.')) {
-                throw new Error(`Illegal filename '${filepath}'`);
-            }
-
-            fs.accessSync(filepath, fs.constants.R_OK);
+            assertFilePath(filepath);
 
             const stat: fs.Stats = fs.statSync(filepath);
             if ( (mode == Mode.Both && (stat.isFile() || stat.isDirectory()) ) ||
                  (mode == Mode.File && stat.isFile()) ||
                  (mode == Mode.Directory && stat.isDirectory()) ) {
-                const _relpath = relativePath(baseDir, dir);
+                const _relpath = relativePath(baseDir, currentDir);
                 var fileObject = {
                     isFile: stat.isFile(),
                     filename: file,
@@ -90,7 +119,7 @@ function* dirsAndFiles(baseDir: string, dir: string, options?: { pattern?: RegEx
                 yield fileObject;
             }
             if (stat.isDirectory()) {
-                yield* dirsAndFiles(baseDir, filepath, options);
+                yield* __files(baseDir, filepath, options);
             }
         } catch (err) {
             console.error(err.name + ': ' + err.message);
@@ -437,13 +466,13 @@ process.on('SIGINT', () => {
                     resolve();
                 });
 
-            var folders = dirsAndFiles(basedir, basedir, { mode: Mode.Directory, pattern: pattern });
-            for(var file of folders) {
-                queue.enqueue(file);
+            var _folders = files(basedir, { mode: Mode.Directory, pattern: pattern });
+            for(var folder of _folders) {
+                queue.enqueue(folder);
             }
 
-            var files = dirsAndFiles(basedir, basedir, { mode: Mode.File, pattern: pattern });
-            for(var file of files) {
+            var _files = files(basedir, { mode: Mode.File, pattern: pattern });
+            for(var file of _files) {
                 queue.enqueue(file);
             }
         });
