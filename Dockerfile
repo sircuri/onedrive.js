@@ -21,4 +21,5 @@ VOLUME /config /workdir
 
 EXPOSE 8001
 
-CMD [ "node", "./lib/index.js", "-f", "/config/config.json", "-w", "/workdir" ]
+ENTRYPOINT [ "node", "./lib/index.js", "-f", "/config/config.json", "-w", "/workdir" ]
+CMD [ "-d", "/" ]
