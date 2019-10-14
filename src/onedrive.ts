@@ -1,13 +1,13 @@
 import * as fs from 'fs';
 import _ from 'lodash';
+import * as path from 'path';
 import request = require('request');
 import { Transform, TransformOptions, TransformCallback } from 'stream';
 import { AccessToken, OAuthClient } from "simple-oauth2";
 import { IConfig, IOneDriveSection } from './config/config';
 import { create } from 'simple-oauth2';
 import { OAuthClientCallback } from './oauth-helper';
-import { basename, join } from 'path';
-import { IProgress } from '.';
+import { IProgress, FileObject } from '.';
 
 const crypto = require('crypto');
 const isDate = require('date-fns/isDate');
@@ -83,9 +83,6 @@ export class UploadSession {
     }
 
     start(totalValue: number, progress: IProgress) {
-        if (this.filename.length > 25) this.filename = this.filename.substr(0, 25);
-        else while (this.filename.length < 25) this.filename += ' ';
-
         this.bar = progress.start(this.filename, this.startPosition(), totalValue);
     }
 
@@ -300,13 +297,14 @@ export class OneDriveApi {
         });
     }
 
-    public async createUploadSession(filePath: string, fileSystemInfo: any) {
+    public async createUploadSession(file: FileObject, fileSystemInfo: any) {
         // TODO: Store upload session for resume
         return new Promise<UploadSession>((resolve, reject) => {
-            var session = new UploadSession(filePath);
+            var joined = path.join(file.dirName, file.filename);
+            var session = new UploadSession(joined);
             if (!session.resumable) {
                 const options = {
-                    url: this.itemByPathUrl + ':' + this.destinationPath + '/' + encodeURI(filePath) + ':/createUploadSession',
+                    url: this.itemByPathUrl + ':' + this.destinationPath + '/' + encodeURI(joined) + ':/createUploadSession',
                     headers: {
                         'Authorization': this.accessToken.token.access_token,
                     },
@@ -314,7 +312,7 @@ export class OneDriveApi {
                         "item": {
                             "@odata.type": "microsoft.graph.driveItemUploadableProperties",
                             "@microsoft.graph.conflictBehavior": "replace",
-                            "name": basename(filePath),
+                            "name": file.filename,
                             "fileSystemInfo": fileSystemInfo
                         }
                     }
@@ -369,11 +367,11 @@ export class OneDriveApi {
         return Math.abs(closestTo - n1) < Math.abs(closestTo - n2) ? n1 : n2;
     }
 
-    private async uploadFileToSession(uploadSession: UploadSession, fullPath: string, stats: fs.Stats, progress: IProgress) {
+    private async uploadFileToSession(uploadSession: UploadSession, file: FileObject, stats: fs.Stats, progress: IProgress) {
         uploadSession.start(stats.size, progress);
 
         var offset = uploadSession.startPosition();
-        var readStream = fs.createReadStream(fullPath, { start: offset });
+        var readStream = fs.createReadStream(file.absolutePath, { start: offset });
         var fixedSizeTransform = new FixedChunkSizeTransform(this.offsetSize);
         readStream.pipe(fixedSizeTransform);
 
@@ -384,30 +382,25 @@ export class OneDriveApi {
             offset += this.offsetSize;
         }
         uploadSession.finish();
-        // console.log(`Uploaded '${fullPath}': ${this.convertbytes(bytesWritten)}`)
 
         return bytesWritten;
     }
 
-    public async uploadSingleFile(fullPath: string, filePath: string, totalSize: number, progress: IProgress) {
+    public async uploadSingleFile(file: FileObject, totalSize: number, progress: IProgress) {
         return new Promise<number>((resolve, reject) => {
-            var filename = basename(filePath);
-            if (filename.length > 25) filename = filename.substr(0, 25);
-            else while (filename.length < 25) filename += ' ';
-
-            const id = progress.start(filename, 0, totalSize);
+            const id = progress.start(file.filename, 0, totalSize);
     
-            fs.readFile(fullPath, (err, data) => {
+            fs.readFile(file.absolutePath, (err, data) => {
                 if (err) reject(err);
 
                 const options = {
-                    url: this.itemByPathUrl + ':' + this.destinationPath + '/' + encodeURI(filePath) + ':/content',
+                    url: this.itemByPathUrl + ':' + this.destinationPath + '/' + encodeURI(path.join(file.dirName, file.filename)) + ':/content',
                     headers: {
                         'Authorization': this.accessToken.token.access_token,
                     },
                     body: data
                 };
-    
+                console.log(options);
                 this.put(options)
                     .then(data => {
                         var result = JSON.parse(data);
@@ -427,47 +420,45 @@ export class OneDriveApi {
         else return `${bytes}`;
     }
     
-    public async getExistingFile(filePath: string) {
+    public async getExistingFile(file: FileObject) {
         return new Promise<FileInfo>(resolve => {
             const options = {
-                url: this.itemByPathUrl + ':' + this.destinationPath + '/' + encodeURI(filePath),
+                url: this.itemByPathUrl + ':' + encodeURI(path.join(this.destinationPath, file.dirName, file.filename)),
                 headers: {
                     'Authorization': this.accessToken.token.access_token
                 }
             };
-
             this.get(options)
                 .then(data => resolve(new FileInfo(JSON.parse(data))))
                 .catch(_ => resolve(new FileInfo({})));
         });
     }
 
-    public async uploadFile(basePath: string, filePath: string, progress: IProgress) {
+    public async uploadFile(file: FileObject, progress: IProgress) {
         return new Promise<number>((resolve, reject) => {
             const maxUploadSize = 4 * 1024 * 1024;
-            const fullPath = join(basePath, filePath);
-            const stats = fs.statSync(fullPath);
+            const stats = fs.statSync(file.absolutePath);
 
             if (this.oneDriveConfig.simpleUploadSmallFiles && stats.size < maxUploadSize) {
                 this.verifyAccessToken()
-                    .then(() => this.uploadSingleFile(fullPath, filePath, stats.size, progress))
+                    .then(() => this.uploadSingleFile(file, stats.size, progress))
                     .then(bytesWritten => resolve(bytesWritten))
                     .catch(reason => reject(reason))
             } else {
                 this.verifyAccessToken()
-                    .then(() => this.getExistingFile(filePath))
+                    .then(() => this.getExistingFile(file))
                     .then(fileInfo => {
                         if (!fileInfo.changed(stats)) {
                             throw new Error("File not changed.");
                         }
-                        return this.createUploadSession(filePath, {
+                        return this.createUploadSession(file, {
                             "@odata.type": "microsoft.graph.fileSystemInfo",
                             "createdDateTime": stats.ctime,
                             "lastAccessedDateTime": stats.atime,
                             "lastModifiedDateTime": stats.mtime
                         })
                     })
-                    .then(uploadSession => this.uploadFileToSession(uploadSession, fullPath, stats, progress), 
+                    .then(uploadSession => this.uploadFileToSession(uploadSession, file, stats, progress), 
                           _ => 0)
                     .then(bytesWritten => resolve(bytesWritten))
                     .catch(reason => {console.log(reason); reject(reason);})
@@ -475,10 +466,10 @@ export class OneDriveApi {
         });
     }
 
-    public async createFolder(parentPath: string, folderName: string, progress: IProgress) {
-        const fullPath = join(this.destinationPath, parentPath);
+    public async createFolder(file: FileObject, progress: IProgress) {
+        const fullPath = path.join(this.destinationPath, file.dirName);
         return new Promise((resolve, reject) => {
-            const id = progress.start(`<${folderName}>`, 0, 100);
+            const id = progress.start(`<${path.join(file.dirName, file.filename)}>`, 0, 100);
             const url = fullPath == '/' ? '/' : ':' + encodeURI(fullPath) + ':';
             const options = {
                 url: this.itemByPathUrl + url + '/children',
@@ -486,7 +477,7 @@ export class OneDriveApi {
                     'Authorization': this.accessToken.token.access_token
                 },
                 json: {
-                    "name": folderName,
+                    "name": file.filename,
                     "folder": {},
                     "@microsoft.graph.conflictBehavior": "replace"
                 }

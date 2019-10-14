@@ -5,4 +5,3 @@ docker pull sircuri/onedrive && docker run -it --rm --user=root:root -v ~/onedri
 TODO:
 
 - PATCH files with correct dates for the simple uploaded files
-- Implement file upload ignore if file is the same (custom meta data?)

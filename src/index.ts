@@ -17,18 +17,26 @@ var argv = yargs
     .alias('f', 'file')
     .nargs('f', 1)
     .describe('f', 'Config file')
-    .alias('p', 'path')
-    .nargs('p', 1)
-    .describe('p', 'Path to upload')
-    .demandOption(['p', 'f'])
-    .alias('e', 'pattern')
-    .nargs('e', 1)
-    .describe('e', 'RegEx pattern on files to upload')
+    .alias('w', 'workdir')
+    .nargs('w', 1)
+    .describe('w', 'Workdir')
+    .alias('d', 'dir')
+    .nargs('d', 1)
+    .describe('d', 'Filepath to upload')
+    .demandOption(['w', 'f', 'd'])
 
     .help('h')
     .alias('h', 'help')
     .epilog('copyright 2019')
     .argv;
+
+const configfile = argv.f as string;
+const workdir = argv.w as string;
+const basedir = argv.d as string;
+
+const config = new Config(configfile);
+const api = new OneDriveApi(config);
+
 
 function relativePath(basePath: string, absolutePath: string) {
     if (absolutePath.startsWith(basePath)) {
@@ -42,10 +50,11 @@ function relativePath(basePath: string, absolutePath: string) {
 
 export interface FileObject {
     isFile: boolean;
-    filename: string;
     size: number;
-    path: string;
-    basedir: string;
+    filename: string;
+    dirName: string;
+    baseDir: string;
+    absoluteBaseDir: string;
     absolutePath: string;
 }
 
@@ -65,65 +74,54 @@ function assertFilePath(fullPath: string): void {
     fs.accessSync(fullPath, fs.constants.R_OK);
 }
 
-function* files(baseDir: string, options?: { pattern?: RegExp, mode?: Mode }): Generator<FileObject> {
-    const stat: fs.Stats = fs.statSync(baseDir);
+function expand(...paths: string[]): string {
+    return path.join(workdir, ...paths);
+}
+/*
+filename: fiets.pdf
+dirName: /subdir/of/workdir
+baseDir: /subdir
+absolutePath: /workdir/subdir/of/workdir/fiets.pdf
+*/
+function* files(baseDir: string, filePath: string, options?: { mode?: Mode }): Generator<FileObject> {
+    const mode: Mode = options !== undefined ? (options.mode !== undefined ? options.mode : Mode.Both) : Mode.Both;
+    const expanded = expand(baseDir, filePath);
+    const stat: fs.Stats = fs.statSync(expanded);
 
     try {
-        if (stat.isFile()) {
-            assertFilePath(baseDir);
-            const _filePath = path.basename(baseDir);
-            var fileObject = {
-                isFile: stat.isFile(),
-                filename: _filePath,
-                size: stat.size,
-                path: path.join('/', _filePath),
-                basedir: '/',
-                absolutePath: _filePath
-            };
-            yield fileObject;        
-        } else {
-            yield* __files(baseDir, baseDir, options);
-        }
-    } catch (err) {
-        console.error(err.name + ': ' + err.message);
-    }
-}
-
-function* __files(baseDir: string, currentDir: string, options?: { pattern?: RegExp, mode?: Mode }): Generator<FileObject> {
-    const filePattern: RegExp | undefined = options !== undefined ? options.pattern : undefined;
-    const mode: Mode = options !== undefined ? (options.mode !== undefined ? options.mode : Mode.Both) : Mode.Both;
-
-    const files = fs.readdirSync(currentDir);
-    for (const file of files) {
-        if (filePattern !== undefined && !filePattern.test(file))
-            continue;
-
-        const filepath = path.join(currentDir, file);
-
-        try {
-            assertFilePath(filepath);
-
-            const stat: fs.Stats = fs.statSync(filepath);
-            if ( (mode == Mode.Both && (stat.isFile() || stat.isDirectory()) ) ||
-                 (mode == Mode.File && stat.isFile()) ||
-                 (mode == Mode.Directory && stat.isDirectory()) ) {
-                const _relpath = relativePath(baseDir, currentDir);
+        if (stat.isDirectory()) {
+            if (mode == Mode.Both || mode == Mode.Directory) {
                 var fileObject = {
-                    isFile: stat.isFile(),
-                    filename: file,
-                    size: stat.size,
-                    path: path.join(_relpath, file),
-                    basedir: _relpath,
-                    absolutePath: filepath
+                    isFile: false,
+                    size: 0,
+                    filename: path.basename(filePath),
+                    dirName: path.dirname(filePath),
+                    baseDir: baseDir,
+                    absoluteBaseDir: workdir,
+                    absolutePath: expanded
                 };
                 yield fileObject;
             }
-            if (stat.isDirectory()) {
-                yield* __files(baseDir, filepath, options);
+
+            const _files = fs.readdirSync(expanded);
+            for (const file of _files) {
+                yield* files(baseDir, path.join(filePath, file), options);
             }
-        } catch (err) {
-            console.error(err.name + ': ' + err.message);
+        } else if (stat.isFile() && (mode == Mode.Both || mode == Mode.File)) {
+            assertFilePath(expanded);
+            var fileObject = {
+                isFile: true,
+                size: stat.size,
+                filename: path.basename(filePath),
+                dirName: path.dirname(filePath),
+                baseDir: baseDir,
+                absoluteBaseDir: workdir,
+                absolutePath: expanded
+            };
+            yield fileObject;        
         }
+    } catch (err) {
+        console.error(err.name + ': ' + err.message);
     }
 }
 
@@ -369,22 +367,11 @@ process.on('SIGINT', () => {
 
 (async () => {
 
-    const basedir = argv.p as string;
-    const configfile = argv.f as string;
-    var pattern: RegExp | undefined = undefined;
-
-    if (argv.e !== undefined) {
-        pattern = str2Regex(argv.e as string);
-    }
-
-    const config = new Config(configfile);
-    const api = new OneDriveApi(config);
-
-    async function upload(basedir: string, file: FileObject, progress: IProgress) {
+    async function upload(file: FileObject, progress: IProgress) {
         if (file.isFile) {
-            await api.uploadFile(basedir, file.path, progress);
+            await api.uploadFile(file, progress);
         } else {
-            await api.createFolder(file.basedir, file.filename, progress);
+            await api.createFolder(file, progress);
         }
     }
 
@@ -429,10 +416,6 @@ process.on('SIGINT', () => {
         }
     }
 
-    function str2Regex(s) {
-        return new RegExp(s.match(/\/(.+)\/.*/)[1], s.match(/\/.+\/(.*)/)[1]);
-    }
-
     async function go() {
         return new Promise<void>((resolve) => {
             // create a queue object with worker and concurrency 2
@@ -443,10 +426,10 @@ process.on('SIGINT', () => {
                     format: ''
                 })
                 .withWorker((data, progress, done) => {
-                    upload(basedir, data, progress)
+                    upload(data, progress)
                         .then(() => done())
                         .catch((reason) => {
-                            console.log(`Could not handle '${path.join(data.basedir, data.filename)}'`);
+                            console.log(`Could not handle '${data.absolutePath}'`);
                             console.log(reason);
 
                             if ('statusCode' in reason) {
@@ -466,12 +449,12 @@ process.on('SIGINT', () => {
                     resolve();
                 });
 
-            var _folders = files(basedir, { mode: Mode.Directory, pattern: pattern });
+            var _folders = files(path.dirname(basedir), basedir, { mode: Mode.Directory });
             for(var folder of _folders) {
                 queue.enqueue(folder);
             }
 
-            var _files = files(basedir, { mode: Mode.File, pattern: pattern });
+            var _files = files(path.dirname(basedir), basedir, { mode: Mode.File });
             for(var file of _files) {
                 queue.enqueue(file);
             }
