@@ -5,12 +5,12 @@
     },
     "onedrive": {
       "authentication": {
-        "clientId": "0206c1ab-8cc1-4a08-a7d7-ea2fd1462f52",
-        "clientSecret": "tgNBKB894)=_bbvzhDQG29)",
+        "clientId": "CLIENT-ID",
+        "clientSecret": "CLIENT-SECRET",
         "tokenFilePath": "/tmp/onedrive.token.json"
       },
+      "destinationPath": "/Upload",
       "fragmentSizeMB": 4,
-      "destinationPath": "/test",
       "simpleUploadSmallFiles": false
     }
   }
