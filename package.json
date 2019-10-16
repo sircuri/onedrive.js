@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "npm run build:live",
-    "build:live": "nodemon --exec ./node_modules/.bin/ts-node -- ./src/index.ts upload -f config.development.json -w /Users/arjen/Downloads -d /appicon",
+    "build:live": "nodemon --exec ./node_modules/.bin/ts-node -- ./src/index.ts upload -f config.json -w /var/backups -d /file.ext",
     "build:prod": "tsc",
     "run:live": "node ./lib/index.js"
   },
