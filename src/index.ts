@@ -37,17 +37,6 @@ const basedir = argv.d as string;
 const config = new Config(configfile);
 const api = new OneDriveApi(config);
 
-
-function relativePath(basePath: string, absolutePath: string) {
-    if (absolutePath.startsWith(basePath)) {
-        let _path = absolutePath.substring(basePath.length);
-        if (_path.length == 0) _path = path.sep;
-        return _path;
-    } else {
-        return path.relative(basePath, absolutePath);
-    }
-}
-
 export interface FileObject {
     isFile: boolean;
     size: number;
@@ -77,12 +66,7 @@ function assertFilePath(fullPath: string): void {
 function expand(...paths: string[]): string {
     return path.join(workdir, ...paths);
 }
-/*
-filename: fiets.pdf
-dirName: /subdir/of/workdir
-baseDir: /subdir
-absolutePath: /workdir/subdir/of/workdir/fiets.pdf
-*/
+
 function* files(baseDir: string, filePath: string, options?: { mode?: Mode }): Generator<FileObject> {
     const mode: Mode = options !== undefined ? (options.mode !== undefined ? options.mode : Mode.Both) : Mode.Both;
     const expanded = expand(baseDir, filePath);
@@ -90,11 +74,12 @@ function* files(baseDir: string, filePath: string, options?: { mode?: Mode }): G
 
     try {
         if (stat.isDirectory()) {
-            if (mode == Mode.Both || mode == Mode.Directory) {
+            var filename = path.basename(filePath);
+            if ((mode == Mode.Both || mode == Mode.Directory) && filename != '') {
                 var fileObject = {
                     isFile: false,
                     size: 0,
-                    filename: path.basename(filePath),
+                    filename: filename,
                     dirName: path.dirname(filePath),
                     baseDir: baseDir,
                     absoluteBaseDir: workdir,
@@ -118,124 +103,34 @@ function* files(baseDir: string, filePath: string, options?: { mode?: Mode }): G
                 absoluteBaseDir: workdir,
                 absolutePath: expanded
             };
-            yield fileObject;        
+            yield fileObject;
         }
     } catch (err) {
         console.error(err.name + ': ' + err.message);
     }
 }
 
-interface ProgressBar {
+export interface JobData {
     id: number;
+    retryCount: number;
+    delay: number;
     name: string;
     current: number;
     total: number;
-    completed: boolean;
-    _status: number;
-}
-
-export interface IProgress {
-    start(name: string, current: number, total: number): number;
-    update(id: number, current: number): void;
-}
-
-class ProgressComponent implements IProgress {
-    bars: ProgressBar[] = [];
-    timer: NodeJS.Timeout;
-    options = {};
-
-    constructor(private size: number) {
-        for(var idx = 0; idx < size; idx++) {
-            this.bars.push({
-                id: idx,
-                name: '<none>',
-                current: 0,
-                total: 0,
-                completed: true,
-                _status: 0
-            });
-        }
-
-        this.timer = setTimeout(this.render.bind(this), 1000);
-    }
-
-    setOptions(options: {}) {
-        this.options = options;
-    }
-
-    render() {
-        const status: string[] = [' ', '|', '/', '-', '\\'];
-        const runningTasks = this.size - _.filter(this.bars, 'completed').length;
-        console.log(`Tasks active (${runningTasks} / ${this.size})`);
-
-        _.forEach(this.bars, (bar) => {
-            var perc = (bar.completed ? '-' : Math.ceil(bar.current / bar.total * 100)) + ' %';
-            while (perc.length < 5) perc = ' ' + perc;
-
-            const fields = {
-                'task-id': bar.id,
-                'flow': status[bar._status],
-                'perc': perc,
-                'name': bar.name
-            };
-
-            const finalFields = {...fields, ...this.options};
-
-            console.log(`${bar.id}: ${perc} (${status[bar._status]}) || ${bar.name}`);
-        });
-
-        this.timer = setTimeout(this.render.bind(this), 1000);
-    }
-
-    complete() {
-        clearTimeout(this.timer);
-    }
-
-    start(name: string, current: number, total: number): number {
-        if (_.filter(this.bars, 'completed').length == 0) {
-            throw new Error("No room for new progress bar");
-        }
-
-        const elem = _.find(this.bars, 'completed') as ProgressBar;
-        elem.completed = false;
-        elem.current = current;
-        elem.total = total;
-        elem.name = name;
-
-        return elem.id;
-    }
-
-    update(id: number, current: number) {
-        this.bars[id].current = current;
-        this.bars[id].completed = (current == this.bars[id].total);
-
-        if (this.bars[id].completed) {
-            this.bars[id].name = '<none>';
-            this.bars[id]._status = 0;
-        } else {
-            this.bars[id]._status++;
-            if (this.bars[id]._status > 4) this.bars[id]._status = 1;
-        }
-    }
-}
-
-export interface JobData {
-    data: any,
-    retryCount: number;
-    delay: number;
+    data: any;
 }
 
 export class Queue {
     private noop = () => undefined;
 
+    private jobIds: number;
     private maxTasks: number;
     private retries: number;
     private paused: boolean;
+    private renderer: any;
     private saturated: boolean;
     private buffer: number;
-    private renderer: any;
-    private progress: ProgressComponent;
-    private worker: (job: any, progress: IProgress, callback:(err?: any, ...args: any[]) => void) => void;
+    private worker: (job: any, progress: (args: {name?: string, current?: number, total?: number}) => void, callback:(err?: any, ...args: any[]) => void) => void;
 
     private waiting: JobData[] = [];
     private active: JobData[] = [];
@@ -246,7 +141,9 @@ export class Queue {
 
     constructor() {
         this.retries = 0;
+        this.jobIds = 0;
         this.buffer = 0;
+        this.maxTasks = 3;
         this.waiting = [];
         this.active = [];
         this.failed = [];
@@ -256,8 +153,6 @@ export class Queue {
     public concurrent(max: number): Queue {
         this.maxTasks = max;
         this.buffer = Math.floor(max / 4);
-        this.progress = new ProgressComponent(max);
-
         return this;
     }
 
@@ -268,11 +163,10 @@ export class Queue {
 
     public withRenderer(options: any): Queue {
         this.renderer = options;
-        this.progress.setOptions(options);
         return this;
     }
 
-    public withWorker(worker: (job: any, progress: IProgress, callback:(err?: any, ...args: any[]) => void) => void) {
+    public withWorker(worker: (job: any, progress:(args: {name?: string, current?: number, total?: number}) => void, callback:(err?: any, ...args: any[]) => void) => void) {
         this.worker = worker;
         return this;
     }
@@ -292,11 +186,9 @@ export class Queue {
     }
 
     private _startJob() {
-        if(this.waiting.length === 0 && this.active.length === 0)
-        {
-            this.progress.complete();
+        if(this.waiting.length === 0 && this.active.length === 0) {
             this.drain();
-        }
+        };
         if(this.paused || this.active.length >= this.maxTasks || this.waiting.length === 0) return;
 
         const job = this.waiting.shift() !;
@@ -311,7 +203,17 @@ export class Queue {
         let doneCalled = false;
         let delay = job.retryCount > 0 ? Math.floor(Math.random() * 3) + job.delay : 0;
 
-        setTimeout(this.worker.bind(this), delay, job.data, this.progress, (err?: any, ...args: any[]) => {
+        setTimeout(this.worker.bind(this), delay, job.data, (args: {name?: string, current?: number, total?: number}) => {
+            if (args.name) job.name = args.name;
+            if (args.current) job.current = args.current;
+            if (args.total) job.total = args.total;
+
+            var perc = Math.ceil(job.current / job.total * 100) + ' %';
+            while (perc.length < 5) perc = ' ' + perc;
+    
+            console.log(`${job.id}/${this.jobIds}: ${perc} || ${job.name}`);
+    
+        }, (err?: any, ...args: any[]) => {
             if(doneCalled){
                 throw new Error('Callback can only be called once in the worker');
             } else {
@@ -324,12 +226,15 @@ export class Queue {
                 if (job.retryCount < this.retries) {
                     job.retryCount++;
                     job.delay = delay;
+                    console.log(`${job.id}/${this.jobIds}: <failed - retry ${job.retryCount}/${this.retries}> || ${job.name}`);
                     this.waiting.unshift(job);
                 } else {
+                    console.log(`${job.id}/${this.jobIds}: <FAILED> || ${job.name}`);
                     this.failed.push(job);
                 }
             } else {
                 this.finished.push(job);
+                console.log(`${job.id}/${this.jobIds}: <finished> || ${job.name}`);
                 // if(err) onError.call(job.data, err, ...args);
                 // if(!err) onSuccess.call(job.data, ...args);
             }
@@ -349,8 +254,12 @@ export class Queue {
 
         const jobData = {
             data: job,
+            id: ++this.jobIds,
             retryCount: 0,
-            delay: 0
+            delay: 0,
+            name: "Starting...",
+            current: 0,
+            total: 1
         };
 
         this.waiting.push(jobData);
@@ -361,13 +270,13 @@ export class Queue {
 
 var process = require('process')
 process.on('SIGINT', () => {
-  console.info("Interrupted")
-  process.exit(0)
+  console.info("Interrupted");
+  process.exit(0);
 });
 
 (async () => {
 
-    async function upload(file: FileObject, progress: IProgress) {
+    async function upload(file: FileObject, progress: (args: {name?: string, current?: number, total?: number}) => void) {
         if (file.isFile) {
             await api.uploadFile(file, progress);
         } else {
