@@ -7,7 +7,7 @@ import { AccessToken, OAuthClient } from "simple-oauth2";
 import { IConfig, IOneDriveSection } from './config/config';
 import { create } from 'simple-oauth2';
 import { OAuthClientCallback } from './oauth-helper';
-import { IProgress, FileObject } from '.';
+import { FileObject } from '.';
 
 const crypto = require('crypto');
 const isDate = require('date-fns/isDate');
@@ -17,7 +17,6 @@ export class UploadSession {
     expirationDateTime: Date;
     nextExpectedRanges: string[] = [];
     uploadUrl: string;
-    bar: number;
     sha256HexHash: string;
     resumable: boolean = false;
 
@@ -82,12 +81,16 @@ export class UploadSession {
         }
     }
 
-    start(totalValue: number, progress: IProgress) {
-        this.bar = progress.start(this.filename, this.startPosition(), totalValue);
+    start(totalValue: number, progress: (args: {name?: string, current?: number, total?: number}) => void) {
+        progress({
+            name: this.filename,
+            current: this.startPosition(),
+            total: totalValue
+        });
     }
 
-    update(newValue: number, progress: IProgress) {
-        progress.update(this.bar, newValue);
+    update(newValue: number, progress: (args: {name?: string, current?: number, total?: number}) => void) {
+        progress({ current: newValue });
     }
 }
 
@@ -247,7 +250,7 @@ export class OneDriveApi {
         return new Promise((resolve, reject) => {
             this.verifyAccessToken()
                 .then(() => {
-                    request.get(options, (error, response, data) => {
+                    request.get({...options, ...{ timeout: 10000 }}, (error, response, data) => {
                         if (error) reject(error);
                         else if (!this.isSuccess(response)) reject({
                             statusCode: response.statusCode,
@@ -265,7 +268,7 @@ export class OneDriveApi {
         return new Promise((resolve, reject) => {
             this.verifyAccessToken()
                 .then(() => {
-                    request.post(options, (error, response, data) => {
+                    request.post({...options, ...{ timeout: 10000 }}, (error, response, data) => {
                         if (error) reject(error);
                         else if (!this.isSuccess(response)) reject({
                             statusCode: response.statusCode,
@@ -283,7 +286,7 @@ export class OneDriveApi {
         return new Promise((resolve, reject) => {
             this.verifyAccessToken()
                 .then(() => {
-                    request.put(options, (error, response, data) => {
+                    request.put({...options, ...{ timeout: 10000 }}, (error, response, data) => {
                         if (error) reject(error);
                         else if (!this.isSuccess(response)) reject({
                             statusCode: response.statusCode,
@@ -367,7 +370,7 @@ export class OneDriveApi {
         return Math.abs(closestTo - n1) < Math.abs(closestTo - n2) ? n1 : n2;
     }
 
-    private async uploadFileToSession(uploadSession: UploadSession, file: FileObject, stats: fs.Stats, progress: IProgress) {
+    private async uploadFileToSession(uploadSession: UploadSession, file: FileObject, stats: fs.Stats, progress: (args: {name?: string, current?: number, total?: number}) => void) {
         uploadSession.start(stats.size, progress);
 
         var offset = uploadSession.startPosition();
@@ -386,9 +389,9 @@ export class OneDriveApi {
         return bytesWritten;
     }
 
-    public async uploadSingleFile(file: FileObject, totalSize: number, progress: IProgress) {
+    public async uploadSingleFile(file: FileObject, totalSize: number, progress: (args: {name?: string, current?: number, total?: number}) => void) {
         return new Promise<number>((resolve, reject) => {
-            const id = progress.start(file.filename, 0, totalSize);
+            progress({ name: file.filename, current: 0, total: totalSize });
     
             fs.readFile(file.absolutePath, (err, data) => {
                 if (err) reject(err);
@@ -404,7 +407,7 @@ export class OneDriveApi {
                 this.put(options)
                     .then(data => {
                         var result = JSON.parse(data);
-                        progress.update(id, result.size);
+                        progress({ current: result.size });
                         resolve(result.size as number);
                     })
                     .catch(reason => reject(reason));
@@ -434,7 +437,7 @@ export class OneDriveApi {
         });
     }
 
-    public async uploadFile(file: FileObject, progress: IProgress) {
+    public async uploadFile(file: FileObject, progress: (args: {name?: string, current?: number, total?: number}) => void) {
         return new Promise<number>((resolve, reject) => {
             const maxUploadSize = 4 * 1024 * 1024;
             const stats = fs.statSync(file.absolutePath);
@@ -466,10 +469,14 @@ export class OneDriveApi {
         });
     }
 
-    public async createFolder(file: FileObject, progress: IProgress) {
+    public async createFolder(file: FileObject, progress: (args: {name?: string, current?: number, total?: number}) => void) {
         const fullPath = path.join(this.destinationPath, file.dirName);
         return new Promise((resolve, reject) => {
-            const id = progress.start(`<${path.join(file.dirName, file.filename)}>`, 0, 100);
+            progress({
+                name: `<${path.join(file.dirName, file.filename)}>`,
+                current: 0,
+                total: 100 
+            });
             const url = fullPath == '/' ? '/' : ':' + encodeURI(fullPath) + ':';
             const options = {
                 url: this.itemByPathUrl + url + '/children',
@@ -484,7 +491,7 @@ export class OneDriveApi {
             };
             this.post(options)
                 .then(data => {
-                    progress.update(id, 100);
+                    progress({ current: 100 });
                     resolve(data);
                 })
                 .catch((reason) => reject(reason))
