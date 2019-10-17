@@ -185,6 +185,24 @@ export class Queue {
         return this;
     }
 
+    private log(job: JobData, message?: string) {
+        var jobs = `${this.jobIds}`;
+        var jobIndicator = `${job.id}/${jobs}`;
+        while (jobIndicator.length < (2 * jobs.length) + 1) jobIndicator = ' ' + jobIndicator;
+
+        var info = '';
+        if (message) {
+            info = message;
+            if (info.length > 10) info = info.slice(0, 10);
+        } else {
+            info = Math.ceil(job.current / job.total * 100) + ' %';
+        }
+
+        while (info.length < 10) info = ' ' + info;
+
+        console.log(`[${jobIndicator}] : ${info} - ${job.name}`);
+    }
+
     private _startJob() {
         if(this.waiting.length === 0 && this.active.length === 0) {
             this.drain();
@@ -208,10 +226,7 @@ export class Queue {
             if (args.current) job.current = args.current;
             if (args.total) job.total = args.total;
 
-            var perc = Math.ceil(job.current / job.total * 100) + ' %';
-            while (perc.length < 5) perc = ' ' + perc;
-    
-            console.log(`${job.id}/${this.jobIds}: ${perc} || ${job.name}`);
+            this.log(job);
     
         }, (err?: any, ...args: any[]) => {
             if(doneCalled){
@@ -226,15 +241,15 @@ export class Queue {
                 if (job.retryCount < this.retries) {
                     job.retryCount++;
                     job.delay = delay;
-                    console.log(`${job.id}/${this.jobIds}: <failed - retry ${job.retryCount}/${this.retries}> || ${job.name}`);
+                    this.log(job, `<ERR|${job.retryCount}/${this.retries}>`);
                     this.waiting.unshift(job);
                 } else {
-                    console.log(`${job.id}/${this.jobIds}: <FAILED> || ${job.name}`);
+                    this.log(job, '<FAILED>');
                     this.failed.push(job);
                 }
             } else {
                 this.finished.push(job);
-                console.log(`${job.id}/${this.jobIds}: <finished> || ${job.name}`);
+                this.log(job, '<FINISHED>');
                 // if(err) onError.call(job.data, err, ...args);
                 // if(!err) onSuccess.call(job.data, ...args);
             }
@@ -257,7 +272,7 @@ export class Queue {
             id: ++this.jobIds,
             retryCount: 0,
             delay: 0,
-            name: "Starting...",
+            name: "...",
             current: 0,
             total: 1
         };
@@ -337,7 +352,7 @@ process.on('SIGINT', () => {
                 .withWorker((data, progress, done) => {
                     upload(data, progress)
                         .then(() => done())
-                        .catch((reason) => {
+                        .catch(reason => {
                             console.log(`Could not handle '${data.absolutePath}'`);
                             console.log(reason);
 
@@ -350,7 +365,7 @@ process.on('SIGINT', () => {
                                 }
                             }
                             else {
-                                done();
+                                done(5);
                             }
                         });
                 })

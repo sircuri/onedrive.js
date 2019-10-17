@@ -190,6 +190,8 @@ export class OneDriveApi {
     private itemByPathUrl: string = "https://graph.microsoft.com/v1.0/me/drive/root";
     private destinationPath: string;
 
+    private defaultTimeout: number = 20000; // 20 seconds
+
     constructor(private config: IConfig) {
         this.oneDriveConfig = this.config.onedrive();
         this.tokenFilePath = this.oneDriveConfig.authentication.tokenFilePath;
@@ -250,7 +252,7 @@ export class OneDriveApi {
         return new Promise((resolve, reject) => {
             this.verifyAccessToken()
                 .then(() => {
-                    request.get({...options, ...{ timeout: 10000 }}, (error, response, data) => {
+                    request.get({...options, ...{ timeout: this.defaultTimeout }}, (error, response, data) => {
                         if (error) reject(error);
                         else if (!this.isSuccess(response)) reject({
                             statusCode: response.statusCode,
@@ -268,7 +270,7 @@ export class OneDriveApi {
         return new Promise((resolve, reject) => {
             this.verifyAccessToken()
                 .then(() => {
-                    request.post({...options, ...{ timeout: 10000 }}, (error, response, data) => {
+                    request.post({...options, ...{ timeout: this.defaultTimeout }}, (error, response, data) => {
                         if (error) reject(error);
                         else if (!this.isSuccess(response)) reject({
                             statusCode: response.statusCode,
@@ -286,7 +288,7 @@ export class OneDriveApi {
         return new Promise((resolve, reject) => {
             this.verifyAccessToken()
                 .then(() => {
-                    request.put({...options, ...{ timeout: 10000 }}, (error, response, data) => {
+                    request.put({...options, ...{ timeout: this.defaultTimeout }}, (error, response, data) => {
                         if (error) reject(error);
                         else if (!this.isSuccess(response)) reject({
                             statusCode: response.statusCode,
