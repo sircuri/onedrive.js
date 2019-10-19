@@ -45,9 +45,3 @@ In the __config.json__ file the __http.port__ must be set to __8001__ and the __
 `docker run -i --rm --user=root:root -v /location/config.json/is:/config -v /var/backups:/workdir -p 8001:8001 sircuri/onedrive -d /file.ext`
 
 There is also a docker image created for running on a Raspberry. Use the following tag `sircuri/onedrive:latest-pi`
-
-# TODO
-
-- PATCH files with correct dates for the simple uploaded files
-- When upload failes, the progress is not removed from the Progress Component and remains visible as active upload.
-- Store upload sessions in exposed docker VOLUME to allow resume after docker restart
