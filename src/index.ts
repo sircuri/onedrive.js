@@ -27,7 +27,7 @@ var argv = yargs
 
     .help('h')
     .alias('h', 'help')
-    .epilog('copyright 2019')
+    .epilog('copyright 2020')
     .argv;
 
 const configfile = argv.f as string;
@@ -345,7 +345,7 @@ process.on('SIGINT', () => {
             // create a queue object with worker and concurrency 2
             const queue = new Queue()
                 .concurrent(10)
-                .retry(3)
+                .retry(20)
                 .withRenderer({
                     format: ''
                 })
