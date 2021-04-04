@@ -204,8 +204,8 @@ export class OneDriveApi {
             },
             auth: {
                 tokenHost: 'https://login.microsoftonline.com',
-                authorizePath: 'common/oauth2/v2.0/authorize',
-                tokenPath: 'common/oauth2/v2.0/token'
+                authorizePath: 'consumers/oauth2/v2.0/authorize',
+                tokenPath: 'consumers/oauth2/v2.0/token'
             }
         };
         this.oauth2Client = create(credentials);
